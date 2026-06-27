@@ -22,6 +22,9 @@ magnitude, handed across by a scale manager.
 - **Earth** — a procedurally-continented globe carrying an **agent-based civilization**: settlements
   grow logistically toward a habitability-limited capacity and colonize nearby land, threading trade
   networks across the surface and climbing the eras *Founding → … → Spacefaring*.
+- **City** — keep zooming past the globe and you land on a SimCity-scale **surface tile**: a coastal
+  city whose downtown rises and whose development front sprawls outward as you speed up time, zoned
+  downtown / residential / industrial.
 
 One **SimClock** drives everything; the time-rate ladder spans `1 hr/s` → `1 Myr/s`. Scroll to zoom,
 drag to orbit, double-click a body to dive in; scroll back out to rise a scale.
@@ -44,7 +47,7 @@ flying the camera between regimes on dive/ascend. Adding a scale is one file + o
 
 ```
 src/core/      regime contract, SimClock, units/time-rate ladder, rng + color (borrowed from ethersim)
-src/regimes/   galaxy · solar (+ Kepler/orbital data) · earth
+src/regimes/   galaxy · solar (+ Kepler/orbital data) · earth · surface (the city)
 src/world/     scale manager, procedural planet field (continents/habitability)
 src/sim/       civilization model (agent-based settlements)
 src/render/    glow sprites, point material, backdrop stars, cross-fade opacity
@@ -56,9 +59,9 @@ See [`docs/architecture.md`](docs/architecture.md) for the design notes and
 
 ## Roadmap
 
+- **Coupled scales** — a comet in the orrery that actually strikes the globe; stellar aging that
+  dims the planet; history that feeds back. (The regimes are independent today.)
 - **True f64 floating-origin** for a single uninterrupted coordinate zoom (ethersim's open item).
-- **Surface regime** — descend below the globe into a SimCity-scale city/region.
-- **Coupled scales** — stellar evolution, climate, and history that feed each other.
 - **Deeper civilization** — economies, conflict, tech trees, players; a world is a seed you can share.
 
 ## License

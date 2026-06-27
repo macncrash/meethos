@@ -121,6 +121,8 @@ export class EarthRegime implements Regime {
       label: 'Earth',
       position: (out) => out.set(0, 0, 0),
       radius: GLOBE_R,
+      childRegime: 'surface',
+      diveDistance: 1.4, // zoom right down to the surface before dropping into the city
       info: () => ({
         title: 'Earth',
         rows: [

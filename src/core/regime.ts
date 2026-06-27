@@ -22,6 +22,9 @@ export interface FocusTarget {
   radius: number;
   /** id of the regime to descend into when diving into this body, if any */
   childRegime?: string;
+  /** explicit dive distance; overrides the radius×factor default (so you can zoom
+   *  right down to a globe's surface before dropping into its child regime) */
+  diveDistance?: number;
   info(clock: SimClock): InspectorInfo;
 }
 
@@ -40,6 +43,9 @@ export interface Regime {
   defaultFocus(): FocusTarget | null;
   /** camera distance (local render units) that frames the whole regime */
   overviewDistance(): number;
+  /** optional preferred camera offset direction (normalized) when arriving here by
+   *  descent — e.g. a 3/4 elevated view for a city. Null keeps the incoming angle. */
+  preferredView?(): Vector3 | null;
 
   onEnter(): void;
   onExit(): void;

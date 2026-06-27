@@ -11,6 +11,7 @@ import type { FocusTarget, Regime } from '../core/regime';
 import { GalaxyRegime } from '../regimes/galaxy';
 import { SolarRegime } from '../regimes/solar';
 import { EarthRegime } from '../regimes/earth';
+import { SurfaceRegime } from '../regimes/surface';
 
 const DIVE_FACTOR = 2.6; // dive when camera closer than focus.radius × this
 const ASCEND_FACTOR = 2.4; // ascend when farther than overview × this
@@ -27,7 +28,8 @@ interface Transition {
   to: Regime;
   endFocus: FocusTarget;
   startTarget: Vector3;
-  offsetDir: Vector3;
+  startOffsetDir: Vector3;
+  endOffsetDir: Vector3;
   startDist: number;
   endDist: number;
   t: number;
@@ -52,10 +54,12 @@ export class ScaleManager {
     const galaxy = new GalaxyRegime();
     const solar = new SolarRegime();
     const earth = new EarthRegime();
+    const surface = new SurfaceRegime();
     this.chain = [
       { regime: galaxy, parentFocusId: null },
       { regime: solar, parentFocusId: 'sol-star' },
       { regime: earth, parentFocusId: 'earth' },
+      { regime: surface, parentFocusId: 'earth-globe' },
     ];
     for (const link of this.chain) {
       this.scene.add(link.regime.object3d);
@@ -139,15 +143,20 @@ export class ScaleManager {
     const from = this.active;
     const to = this.chain[toIndex]!.regime;
     const startTarget = this.controls.target.clone();
-    const offsetDir = this.camera.position.clone().sub(startTarget);
-    if (offsetDir.lengthSq() < 1e-9) offsetDir.set(0.3, 0.4, 1);
-    offsetDir.normalize();
+    const startOffsetDir = this.camera.position.clone().sub(startTarget);
+    if (startOffsetDir.lengthSq() < 1e-9) startOffsetDir.set(0.3, 0.4, 1);
+    startOffsetDir.normalize();
+    // descending into a regime with a preferred landing view? swing toward it.
+    const descending = toIndex > this.index;
+    const preferred = descending ? to.preferredView?.() ?? null : null;
+    const endOffsetDir = (preferred ?? startOffsetDir).clone().normalize();
     this.transition = {
       from,
       to,
       endFocus,
       startTarget,
-      offsetDir,
+      startOffsetDir,
+      endOffsetDir,
       startDist: this.camera.position.distanceTo(startTarget),
       endDist: to.overviewDistance(),
       t: 0,
@@ -193,8 +202,9 @@ export class ScaleManager {
     const endPos = tr.endFocus.position(this.scratch).clone();
     const target = tr.startTarget.clone().lerp(endPos, e);
     const dist = tr.startDist + (tr.endDist - tr.startDist) * e;
+    const dir = tr.startOffsetDir.clone().lerp(tr.endOffsetDir, e).normalize();
     this.controls.target.copy(target);
-    this.camera.position.copy(target).addScaledVector(tr.offsetDir, dist);
+    this.camera.position.copy(target).addScaledVector(dir, dist);
 
     tr.from.setOpacity(1 - e);
     tr.to.setOpacity(e);
@@ -214,7 +224,8 @@ export class ScaleManager {
   private checkTriggers(): void {
     const dist = this.camera.position.distanceTo(this.controls.target);
     const focus = this.currentFocus;
-    if (focus.childRegime && dist < focus.radius * DIVE_FACTOR) {
+    const diveAt = focus.diveDistance ?? focus.radius * DIVE_FACTOR;
+    if (focus.childRegime && dist < diveAt) {
       this.diveInto(focus);
     } else if (this.index > 0 && dist > this.active.overviewDistance() * ASCEND_FACTOR) {
       this.ascend();
