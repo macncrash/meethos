@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added — planets on other stars (procedural systems)
+- A dozen named **neighbor stars** in the galaxy are now divable; each opens a **StarSystemRegime**
+  procedurally generated from the star's seed — a star of some spectral class with 2–7 planets on
+  Keplerian orbits (rocky/gas, some ringed), all uncharted worlds. (`src/regimes/starSystem.ts`.)
+- The scale-navigation model went from a single linear path to a **tree**: regimes ascend via an
+  explicit `parentRegimeId`, so `solar` and `starsystem` are siblings under `galaxy`. The breadcrumb
+  now shows the real ancestral path plus the main-line forward path; the game's "frame the solar
+  system" works from anywhere, including inside a foreign star system.
+
+### Added — the Cosmos scale
+- A new outermost **UniverseRegime**: a cosmic web of ~3,200 galaxies along filaments around voids,
+  with the Milky Way highlighted. The chain is now Cosmos → Milky Way → Solar System → Earth → City.
+
 ### Changed — make Defend Earth actually fun
 - Starting a run now **frames the solar system** (where the comets are) and sets a reactable
   **1 yr/s** pace, so you can see and react to the action instead of watching a number.

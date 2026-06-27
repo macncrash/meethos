@@ -16,7 +16,11 @@ magnitude, handed across by a scale manager.
 
 ## The demo (current vertical slice)
 
-- **Galaxy** — a ~24k-star log-spiral with differential rotation; our Sun is highlighted.
+- **Cosmos** — a cosmic web of ~3,200 galaxies along filaments around voids; the Milky Way is one
+  highlighted node. Dive in to fall to the galaxy.
+- **Galaxy** — a ~24k-star log-spiral with differential rotation; our Sun is highlighted, and a
+  dozen named **neighbor stars** are divable — each opens its own **procedurally-generated planetary
+  system** (different star type, planet count, and worlds every time).
 - **Solar System** — the Sun + 8 planets on real-ish **Keplerian orbits** (ringed Saturn included),
   scrubbable at any time-rate.
 - **Earth** — a procedurally-continented globe carrying an **agent-based civilization**: settlements
@@ -62,7 +66,7 @@ flying the camera between regimes on dive/ascend. Adding a scale is one file + o
 
 ```
 src/core/      regime contract, SimClock, units/time-rate ladder, rng + color (borrowed from ethersim)
-src/regimes/   galaxy · solar (+ Kepler/orbital data) · earth · surface (the city)
+src/regimes/   universe (cosmic web) · galaxy · solar (+ Kepler/data) · starSystem (procedural) · earth · surface
 src/world/     scale manager, procedural planet field (continents/habitability)
 src/sim/       civilization model (agent-based settlements)
 src/render/    glow sprites, point material, backdrop stars, cross-fade opacity

@@ -25,6 +25,8 @@ export interface FocusTarget {
   /** explicit dive distance; overrides the radius×factor default (so you can zoom
    *  right down to a globe's surface before dropping into its child regime) */
   diveDistance?: number;
+  /** seed handed to a configurable child regime on dive (e.g. a star's system) */
+  seed?: number;
   info(clock: SimClock): InspectorInfo;
 }
 
@@ -39,6 +41,9 @@ export interface Regime {
   /** optional: advance even when this regime ISN'T the visible scale — for
    *  cross-scale agents in flight (e.g. a comet heading for Earth). */
   stepBackground?(clock: SimClock): void;
+  /** optional: (re)generate this regime's content from a seed before diving in
+   *  (e.g. a procedural star system). */
+  configure?(seed: number, label: string): void;
 
   /** all selectable bodies at this scale */
   focusTargets(): FocusTarget[];

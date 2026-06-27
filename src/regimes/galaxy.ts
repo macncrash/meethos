@@ -42,6 +42,7 @@ export class GalaxyRegime implements Regime {
   private readonly sunMarker: Sprite;
   private readonly sunPos = new Vector3();
   private readonly targets: FocusTarget[] = [];
+  private readonly neighbors: Array<{ marker: Sprite; offset: Vector3; pos: Vector3 }> = [];
 
   constructor(seed = 0xea2743) {
     const rng = mulberry32(seed);
@@ -81,6 +82,7 @@ export class GalaxyRegime implements Regime {
     this.object3d.add(this.sunMarker);
 
     this.buildTargets();
+    this.buildNeighbors(rng);
     this.update(0);
     this.object3d.name = 'galaxy';
   }
@@ -146,6 +148,46 @@ export class GalaxyRegime implements Regime {
     });
   }
 
+  private buildNeighbors(rng: Rng): void {
+    const NAMES = [
+      'Alpha Centauri', 'Sirius', 'Vega', 'Procyon', 'Altair', 'Tau Ceti', 'Wolf 359',
+      'Trappist-1', 'Gliese 581', 'Epsilon Eridani', 'Ross 128', 'Luyten', 'Barnard', 'Kapteyn',
+    ];
+    const c = new Color();
+    NAMES.forEach((name, i) => {
+      const ang = rng() * Math.PI * 2;
+      const rad = 1.8 + rng() * 5;
+      const offset = new Vector3(Math.cos(ang) * rad, (rng() - 0.5) * 1.6, Math.sin(ang) * rad);
+      const temp = rng() < 0.3 ? 8000 + rng() * 8000 : 3000 + rng() * 3600;
+      blackbodyColor(temp, c);
+      const marker = new Sprite(
+        new SpriteMaterial({ map: glowTexture(c.clone()), blending: AdditiveBlending, depthWrite: false, transparent: true }),
+      );
+      marker.scale.setScalar(1.3);
+      this.object3d.add(marker);
+      const neighbor = { marker, offset, pos: new Vector3() };
+      this.neighbors.push(neighbor);
+
+      const seed = (0x9e3779b1 * (i + 1)) >>> 0;
+      this.targets.push({
+        id: `star${i}`,
+        label: name,
+        childRegime: 'starsystem',
+        seed,
+        radius: 1.4,
+        position: (out) => out.copy(neighbor.pos),
+        info: () => ({
+          title: name,
+          rows: [
+            ['Distance', 'a few ly'],
+            ['Status', 'uncharted'],
+          ],
+          blurb: 'A neighbor star. Dive in to chart its worlds.',
+        }),
+      });
+    });
+  }
+
   private rotationAngle(r: number, seconds: number): number {
     // flat-ish rotation curve: angular speed ∝ 1/r, normalized to Sol's period at SUN_RADIUS
     const omega = (2 * Math.PI) / SUN_PERIOD_SEC; // at SUN_RADIUS
@@ -166,6 +208,11 @@ export class GalaxyRegime implements Regime {
     const sa = this.rotationAngle(SUN_RADIUS, seconds);
     this.sunPos.set(Math.cos(sa) * SUN_RADIUS, 0, Math.sin(sa) * SUN_RADIUS);
     this.sunMarker.position.copy(this.sunPos);
+
+    for (const n of this.neighbors) {
+      n.pos.copy(this.sunPos).add(n.offset);
+      n.marker.position.copy(n.pos);
+    }
   }
 
   step(clock: SimClock): void {

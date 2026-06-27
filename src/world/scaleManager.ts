@@ -13,6 +13,7 @@ import { GalaxyRegime } from '../regimes/galaxy';
 import { SolarRegime } from '../regimes/solar';
 import { EarthRegime } from '../regimes/earth';
 import { SurfaceRegime } from '../regimes/surface';
+import { StarSystemRegime } from '../regimes/starSystem';
 import type { DeflectResult, DefenseStats } from '../regimes/comets';
 import type { WorldBus } from './bus';
 
@@ -22,8 +23,13 @@ const TRANSITION_SEC = 1.15;
 
 interface Link {
   regime: Regime;
-  /** focus id in the PARENT regime that represents this regime (for ascent) */
+  /** the regime to ascend to (null for the root). Enables branching: both `solar`
+   *  and `starsystem` have parent `galaxy`. */
+  parentRegimeId: string | null;
+  /** focus id in the PARENT regime that represents this regime (for ascent framing) */
   parentFocusId: string | null;
+  /** the regime's primary child on the "main line" — for the breadcrumb's forward path */
+  mainChildId?: string;
 }
 
 interface Transition {
@@ -40,7 +46,7 @@ interface Transition {
 
 export class ScaleManager {
   private readonly chain: Link[];
-  private index = 0;
+  private currentId = 'universe';
   private currentFocus: FocusTarget;
   private transition: Transition | null = null;
   private readonly lastFocusPos = new Vector3();
@@ -62,13 +68,16 @@ export class ScaleManager {
     const solar = new SolarRegime(bus);
     const earth = new EarthRegime(bus);
     const surface = new SurfaceRegime(bus);
+    const starsystem = new StarSystemRegime();
     this.solar = solar;
     this.chain = [
-      { regime: universe, parentFocusId: null },
-      { regime: galaxy, parentFocusId: 'home-galaxy' },
-      { regime: solar, parentFocusId: 'sol-star' },
-      { regime: earth, parentFocusId: 'earth' },
-      { regime: surface, parentFocusId: 'earth-globe' },
+      { regime: universe, parentRegimeId: null, parentFocusId: null, mainChildId: 'galaxy' },
+      { regime: galaxy, parentRegimeId: 'universe', parentFocusId: 'home-galaxy', mainChildId: 'solar' },
+      { regime: solar, parentRegimeId: 'galaxy', parentFocusId: 'sol-star', mainChildId: 'earth' },
+      { regime: earth, parentRegimeId: 'solar', parentFocusId: 'earth', mainChildId: 'surface' },
+      { regime: surface, parentRegimeId: 'earth', parentFocusId: 'earth-globe' },
+      // a sibling of `solar` under `galaxy`: any other star's procedural system
+      { regime: starsystem, parentRegimeId: 'galaxy', parentFocusId: null },
     ];
     for (const link of this.chain) {
       this.scene.add(link.regime.object3d);
@@ -89,7 +98,22 @@ export class ScaleManager {
   }
 
   get active(): Regime {
-    return this.chain[this.index]!.regime;
+    return this.linkOf(this.currentId).regime;
+  }
+
+  private linkOf(id: string): Link {
+    return this.chain.find((l) => l.regime.id === id)!;
+  }
+
+  /** number of ancestors above a regime (root = 0) — used to tell descend from ascend */
+  private depth(id: string): number {
+    let d = 0;
+    let p = this.linkOf(id).parentRegimeId;
+    while (p) {
+      d++;
+      p = this.linkOf(p).parentRegimeId;
+    }
+    return d;
   }
 
   get focus(): FocusTarget {
@@ -100,9 +124,24 @@ export class ScaleManager {
     return this.transition !== null;
   }
 
-  /** breadcrumb path: [{id,label,active}] from outermost to current */
+  /** breadcrumb: ancestors (root → current) plus the main-line forward path */
   breadcrumb(): Array<{ id: string; label: string; active: boolean }> {
-    return this.chain.map((l, i) => ({ id: l.regime.id, label: l.regime.label, active: i === this.index }));
+    const ids: string[] = [];
+    // ancestors, root-first
+    let id: string | null = this.currentId;
+    while (id) {
+      ids.unshift(id);
+      id = this.linkOf(id).parentRegimeId;
+    }
+    // forward along the main line from current
+    const seen = new Set(ids);
+    let next = this.linkOf(this.currentId).mainChildId;
+    while (next && !seen.has(next)) {
+      ids.push(next);
+      seen.add(next);
+      next = this.linkOf(next).mainChildId;
+    }
+    return ids.map((i) => ({ id: i, label: this.linkOf(i).regime.label, active: i === this.currentId }));
   }
 
   pickTargets(): FocusTarget[] {
@@ -119,44 +158,41 @@ export class ScaleManager {
   /** dive into the focused (or given) body's child regime, if any */
   diveInto(target: FocusTarget): void {
     if (this.transition || !target.childRegime) return;
-    const toIdx = this.chain.findIndex((l) => l.regime.id === target.childRegime);
-    if (toIdx < 0) return;
-    this.beginTransition(toIdx, this.chain[toIdx]!.regime.defaultFocus()!);
+    const link = this.chain.find((l) => l.regime.id === target.childRegime);
+    if (!link) return;
+    // (re)generate a configurable child (e.g. a star's procedural system) before entering
+    if (target.seed !== undefined) link.regime.configure?.(target.seed, target.label);
+    this.beginTransition(target.childRegime, link.regime.defaultFocus()!);
   }
 
   /** rise to the parent regime, framing the body we came from */
   ascend(): void {
-    if (this.transition || this.index === 0) return;
-    const childLink = this.chain[this.index]!;
-    const parentIdx = this.index - 1;
-    const parent = this.chain[parentIdx]!.regime;
+    if (this.transition) return;
+    const childLink = this.linkOf(this.currentId);
+    const parentId = childLink.parentRegimeId;
+    if (!parentId) return;
+    const parent = this.linkOf(parentId).regime;
     const focus =
       parent.focusTargets().find((t) => t.id === childLink.parentFocusId) ?? parent.defaultFocus()!;
-    this.beginTransition(parentIdx, focus);
+    this.beginTransition(parentId, focus);
   }
 
   /** jump to a regime by id (breadcrumb click) */
   goTo(regimeId: string): void {
-    if (this.transition) return;
-    const idx = this.chain.findIndex((l) => l.regime.id === regimeId);
-    if (idx < 0 || idx === this.index) return;
-    const focus =
-      idx > this.index
-        ? this.chain[idx]!.regime.defaultFocus()!
-        : this.chain[idx]!.regime.focusTargets().find((t) => t.id === this.chain[this.index]!.parentFocusId) ??
-          this.chain[idx]!.regime.defaultFocus()!;
-    this.beginTransition(idx, focus);
+    if (this.transition || regimeId === this.currentId) return;
+    if (!this.chain.some((l) => l.regime.id === regimeId)) return;
+    this.beginTransition(regimeId, this.linkOf(regimeId).regime.defaultFocus()!);
   }
 
-  private beginTransition(toIndex: number, endFocus: FocusTarget): void {
+  private beginTransition(toId: string, endFocus: FocusTarget): void {
     const from = this.active;
-    const to = this.chain[toIndex]!.regime;
+    const to = this.linkOf(toId).regime;
     const startTarget = this.controls.target.clone();
     const startOffsetDir = this.camera.position.clone().sub(startTarget);
     if (startOffsetDir.lengthSq() < 1e-9) startOffsetDir.set(0.3, 0.4, 1);
     startOffsetDir.normalize();
     // descending into a regime with a preferred landing view? swing toward it.
-    const descending = toIndex > this.index;
+    const descending = this.depth(toId) > this.depth(this.currentId);
     const preferred = descending ? to.preferredView?.() ?? null : null;
     const endOffsetDir = (preferred ?? startOffsetDir).clone().normalize();
     this.transition = {
@@ -170,7 +206,7 @@ export class ScaleManager {
       endDist: to.overviewDistance(),
       t: 0,
     };
-    this.index = toIndex;
+    this.currentId = toId;
     this.currentFocus = endFocus;
     this.controls.enabled = false;
     this.onChange?.();
@@ -208,14 +244,12 @@ export class ScaleManager {
   /** frame the solar system (where the comets are) for a defense run */
   frameForDefense(): void {
     if (this.transition) return;
-    const idx = this.chain.findIndex((l) => l.regime.id === 'solar');
-    if (idx < 0) return;
-    const sun = this.chain[idx]!.regime.defaultFocus()!;
-    if (this.index === idx) {
+    const sun = this.solar.defaultFocus()!;
+    if (this.currentId === 'solar') {
       this.focusOn(sun);
       this.reframeOverview();
     } else {
-      this.beginTransition(idx, sun);
+      this.beginTransition('solar', sun);
     }
   }
 
@@ -293,7 +327,7 @@ export class ScaleManager {
     const diveAt = focus.diveDistance ?? focus.radius * DIVE_FACTOR;
     if (focus.childRegime && dist < diveAt) {
       this.diveInto(focus);
-    } else if (this.index > 0 && dist > this.active.overviewDistance() * ASCEND_FACTOR) {
+    } else if (this.linkOf(this.currentId).parentRegimeId && dist > this.active.overviewDistance() * ASCEND_FACTOR) {
       this.ascend();
     }
   }
