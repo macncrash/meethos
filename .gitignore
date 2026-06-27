@@ -1,16 +1,18 @@
-# Rust build artifacts
-/target
-**/*.rs.bk
-*.pdb
+# dependencies
+/node_modules
 
-# Cargo — keep Cargo.lock for binaries/workspaces (committed by default)
+# build output
+/dist
 
-# Editor / OS
+# editor / OS
 .DS_Store
 .idea/
 .vscode/
 *.swp
 
-# Local environment
+# local env
 .env
 .env.local
+
+# logs
+*.log
