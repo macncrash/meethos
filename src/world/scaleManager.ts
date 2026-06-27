@@ -8,6 +8,7 @@ import { Vector3, type PerspectiveCamera, type Ray, type Scene } from 'three';
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { SimClock } from '../core/clock';
 import type { FocusTarget, Regime } from '../core/regime';
+import { UniverseRegime } from '../regimes/universe';
 import { GalaxyRegime } from '../regimes/galaxy';
 import { SolarRegime } from '../regimes/solar';
 import { EarthRegime } from '../regimes/earth';
@@ -56,13 +57,15 @@ export class ScaleManager {
     private readonly controls: OrbitControls,
     bus: WorldBus,
   ) {
+    const universe = new UniverseRegime();
     const galaxy = new GalaxyRegime();
     const solar = new SolarRegime(bus);
     const earth = new EarthRegime(bus);
     const surface = new SurfaceRegime(bus);
     this.solar = solar;
     this.chain = [
-      { regime: galaxy, parentFocusId: null },
+      { regime: universe, parentFocusId: null },
+      { regime: galaxy, parentFocusId: 'home-galaxy' },
       { regime: solar, parentFocusId: 'sol-star' },
       { regime: earth, parentFocusId: 'earth' },
       { regime: surface, parentFocusId: 'earth-globe' },
@@ -72,12 +75,12 @@ export class ScaleManager {
       link.regime.setOpacity(0);
     }
 
-    const start = galaxy;
+    const start = universe;
     start.setOpacity(1);
     this.currentFocus = start.defaultFocus()!;
     this.currentFocus.position(this.lastFocusPos);
 
-    // initial camera framing: a three-quarter view of the galaxy, aimed at Sol
+    // initial camera framing: a three-quarter view of the cosmic web, aimed home
     const d = start.overviewDistance();
     this.controls.target.copy(this.lastFocusPos);
     this.camera.position.copy(this.lastFocusPos).add(this.scratch.set(0.3, 0.55, 1).normalize().multiplyScalar(d));
