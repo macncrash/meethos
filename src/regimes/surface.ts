@@ -3,12 +3,15 @@
 // outward as you speed up time. This is the "SimCity, but it's one tile of a
 // planet that is one world in a galaxy" payoff.
 import {
+  AdditiveBlending,
   AmbientLight,
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
+  CircleGeometry,
   Color,
   DirectionalLight,
+  DoubleSide,
   Group,
   HemisphereLight,
   InstancedMesh,
@@ -16,9 +19,11 @@ import {
   LineSegments,
   Matrix4,
   Mesh,
+  MeshBasicMaterial,
   MeshLambertMaterial,
   PlaneGeometry,
   Quaternion,
+  RingGeometry,
   Vector3,
   type Material,
 } from 'three';
@@ -27,6 +32,7 @@ import type { FocusTarget, Regime } from '../core/regime';
 import { SECONDS_PER_DAY } from '../core/units';
 import { mulberry32, type Rng } from '../core/rng';
 import { setOpacityDeep } from '../render/opacity';
+import type { WorldBus, ImpactEvent } from '../world/bus';
 
 const GRID = 30; // plots per side
 const SPACING = 2.4;
@@ -34,6 +40,9 @@ const TILE = GRID * SPACING; // ~72 units across
 const PLOT = SPACING * 0.74; // building footprint
 const MAX_HEIGHT = 22; // cap so downtown towers don't grow into needles
 const MAX_CIV_YEARS_PER_FRAME = 120;
+const DAMAGE_DECAY = 0.004; // per year — a flattened block recovers over ~250 yr
+const MAX_SCORCH = 6;
+const RUBBLE = new Color(0x241a14);
 
 type Zone = 'downtown' | 'residential' | 'industrial';
 
@@ -47,6 +56,13 @@ interface Plot {
   height: number; // current
   target: number; // grows over time
   jitter: number;
+  damage: number; // 0 healthy … 1 just-flattened; decays as it rebuilds
+}
+
+interface Shockwave {
+  mesh: Mesh;
+  age: number;
+  life: number;
 }
 
 const ZONE_COLOR: Record<Zone, number> = {
@@ -71,10 +87,14 @@ export class SurfaceRegime implements Regime {
   private front = 6; // development radius (units from centre)
   private years = 0;
   private readonly targets: FocusTarget[] = [];
+  private readonly scorches: Mesh[] = [];
+  private readonly shocks: Shockwave[] = [];
+  private recovering = 0; // peak damage currently healing — drives the inspector
 
-  constructor(seed = 0xc17) {
+  constructor(bus: WorldBus, seed = 0xc17) {
     const rng = mulberry32(seed);
     this.object3d.name = 'surface';
+    bus.onImpact((e) => this.onImpact(e));
 
     this.buildTerrain(rng);
     this.layoutPlots(rng);
@@ -107,9 +127,12 @@ export class SurfaceRegime implements Regime {
         rows: [
           ['Age', `${Math.round(this.years)} yr`],
           ['Blocks', this.buildings.count.toLocaleString()],
-          ['Sprawl', `${(this.front * 2).toFixed(0)} units`],
+          ['Status', this.recovering > 0.02 ? `rebuilding (${Math.round(this.recovering * 100)}% razed)` : 'thriving'],
         ],
-        blurb: 'A single city tile on the surface. Speed time and watch it rise and sprawl toward the coast.',
+        blurb:
+          this.recovering > 0.02
+            ? 'Struck from orbit — blocks flattened to rubble. Speed time and watch it rebuild from the ashes.'
+            : 'A single city tile on the surface. Speed time and watch it rise and sprawl toward the coast.',
       }),
     });
 
@@ -172,7 +195,7 @@ export class SurfaceRegime implements Regime {
         const park = rng() < 0.08; // green gaps
         const buildable = land && !park && r < TILE * 0.52;
         const zone: Zone = r < 12 ? 'downtown' : r < 26 ? 'residential' : 'industrial';
-        const plot: Plot = { x, z, rFromCenter: r, buildable, active: false, zone, height: 0.1, target: 0, jitter: 0.6 + rng() * 0.8 };
+        const plot: Plot = { x, z, rFromCenter: r, buildable, active: false, zone, height: 0.1, target: 0, jitter: 0.6 + rng() * 0.8, damage: 0 };
         this.plots.push(plot);
         if (buildable) this.buildable.push(plot);
       }
@@ -212,27 +235,34 @@ export class SurfaceRegime implements Regime {
   }
 
   step(clock: SimClock): void {
+    this.animateShocks(clock.realDt);
+
     const years = Math.min(clock.dt / (SECONDS_PER_DAY * 365.25), MAX_CIV_YEARS_PER_FRAME);
-    if (years <= 0) return;
+    if (years <= 0) {
+      this.rebuildInstances();
+      return;
+    }
     this.years += years;
 
     // sprawl: development front creeps outward; downtown densifies
     this.front = Math.min(TILE * 0.52, this.front + years * 0.05);
-    let changed = false;
+    let peakDamage = 0;
     for (const p of this.buildable) {
-      if (!p.active && p.rFromCenter < this.front) {
-        p.active = true;
-        changed = true;
-      }
+      if (!p.active && p.rFromCenter < this.front) p.active = true;
+      if (p.damage > 0) p.damage = Math.max(0, p.damage - years * DAMAGE_DECAY);
+      peakDamage = Math.max(peakDamage, p.damage);
       if (p.active) {
         p.target = Math.min(MAX_HEIGHT, p.target * (1 + years * 0.0008), p.target + years * 0.02 * (p.zone === 'downtown' ? 1.6 : 0.6));
-        p.height += (p.target - p.height) * Math.min(1, years * 0.04);
+        // damaged blocks are held down until they rebuild (damage decays)
+        const ceiling = p.target * (1 - p.damage);
+        p.height += (ceiling - p.height) * Math.min(1, years * 0.04);
       }
     }
-    this.rebuildInstances(changed);
+    this.recovering = peakDamage;
+    this.rebuildInstances();
   }
 
-  private rebuildInstances(_topologyChanged = true): void {
+  private rebuildInstances(): void {
     let i = 0;
     for (const p of this.buildable) {
       if (!p.active) continue;
@@ -243,12 +273,80 @@ export class SurfaceRegime implements Regime {
       this.buildings.setMatrixAt(i, this.mtx);
       const tint = 0.55 + Math.min(0.45, h / 28);
       this.col.set(ZONE_COLOR[p.zone]).multiplyScalar(tint);
+      if (p.damage > 0) this.col.lerp(RUBBLE, Math.min(0.85, p.damage)); // scorched rubble
       this.buildings.setColorAt(i, this.col);
       i++;
     }
     this.buildings.count = i;
     this.buildings.instanceMatrix.needsUpdate = true;
     if (this.buildings.instanceColor) this.buildings.instanceColor.needsUpdate = true;
+  }
+
+  // --- cross-scale coupling: a strike on Earth flattens part of THIS city ---
+
+  private onImpact(e: ImpactEvent): void {
+    // blast center, biased toward downtown (the dramatic skyline), scaled by energy
+    const ang = Math.random() * Math.PI * 2;
+    const off = (0.15 + Math.random() * 0.35) * TILE * 0.5;
+    const cx = Math.cos(ang) * off;
+    const cz = Math.sin(ang) * off;
+    const radius = 7 + e.energy * 20;
+
+    for (const p of this.buildable) {
+      const d = Math.hypot(p.x - cx, p.z - cz);
+      if (d > radius) continue;
+      const closeness = 1 - d / radius; // 1 at ground zero
+      const dmg = Math.min(1, closeness * (0.6 + e.energy * 0.7));
+      if (dmg <= p.damage) continue;
+      p.damage = dmg;
+      p.height = Math.min(p.height, p.target * (1 - dmg)); // knocked flat now
+    }
+    this.recovering = Math.max(this.recovering, e.energy);
+
+    // ground scar + expanding shock ring, oriented flat on the tile
+    const flat = new Quaternion().setFromUnitVectors(new Vector3(0, 0, 1), new Vector3(0, 1, 0));
+    const scorch = new Mesh(
+      new CircleGeometry(radius * 0.55, 32),
+      new MeshBasicMaterial({ color: 0x140d0a, transparent: true, opacity: 0.7, side: DoubleSide }),
+    );
+    scorch.position.set(cx, 0.08, cz);
+    scorch.quaternion.copy(flat);
+    this.object3d.add(scorch);
+    this.scorches.push(scorch);
+    if (this.scorches.length > MAX_SCORCH) {
+      const old = this.scorches.shift()!;
+      this.object3d.remove(old);
+      old.geometry.dispose();
+      (old.material as MeshBasicMaterial).dispose();
+    }
+
+    const ring = new Mesh(
+      new RingGeometry(radius * 0.4, radius * 0.55, 48),
+      new MeshBasicMaterial({ color: 0xff7a2a, transparent: true, opacity: 0.9, side: DoubleSide, blending: AdditiveBlending, depthWrite: false }),
+    );
+    ring.position.set(cx, 0.12, cz);
+    ring.quaternion.copy(flat);
+    this.object3d.add(ring);
+    this.shocks.push({ mesh: ring, age: 0, life: 2.4 });
+
+    this.rebuildInstances();
+  }
+
+  private animateShocks(realDt: number): void {
+    for (let i = this.shocks.length - 1; i >= 0; i--) {
+      const s = this.shocks[i]!;
+      s.age += realDt;
+      const t = s.age / s.life;
+      if (t >= 1) {
+        this.object3d.remove(s.mesh);
+        s.mesh.geometry.dispose();
+        (s.mesh.material as MeshBasicMaterial).dispose();
+        this.shocks.splice(i, 1);
+        continue;
+      }
+      s.mesh.scale.setScalar(1 + t * 2.5);
+      (s.mesh.material as MeshBasicMaterial).opacity = (1 - t) * 0.9;
+    }
   }
 
   focusTargets(): FocusTarget[] {

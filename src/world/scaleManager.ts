@@ -58,7 +58,7 @@ export class ScaleManager {
     const galaxy = new GalaxyRegime();
     const solar = new SolarRegime(bus);
     const earth = new EarthRegime(bus);
-    const surface = new SurfaceRegime();
+    const surface = new SurfaceRegime(bus);
     this.solar = solar;
     this.chain = [
       { regime: galaxy, parentFocusId: null },

@@ -26,9 +26,9 @@ magnitude, handed across by a scale manager.
   city whose downtown rises and whose development front sprawls outward as you speed up time, zoned
   downtown / residential / industrial.
 - **Cross-scale coupling** — press **c** (or the ☄ button) to fling a **comet** at Earth from the
-  solar system. It homes in, strikes the globe, leaves a glowing crater, and sets the civilization
-  back — a strike you feel whether you're watching the orrery or standing on the planet. The scales
-  talk to each other.
+  solar system. It homes in and the strike registers at *every* scale at once: a glowing crater on
+  the globe, a civilization population crash, and — dive to the city — whole districts flattened to
+  rubble that rebuild from the ashes as you run time forward. The scales talk to each other.
 
 One **SimClock** drives everything; the time-rate ladder spans `1 hr/s` → `1 Myr/s`. Scroll to zoom,
 drag to orbit, double-click a body to dive in; scroll back out to rise a scale.
@@ -63,8 +63,9 @@ See [`docs/architecture.md`](docs/architecture.md) for the design notes and
 
 ## Roadmap
 
-- **More coupling** — comet strikes land today; next: stellar aging that dims the planet, climate
-  that feeds the civilization, a strike's devastation visible down at the city scale.
+- **More coupling** — comet strikes already register at all four scales; next: stellar aging that
+  dims the planet, climate that feeds the civilization, history that feeds back upward.
+- **Player agency** — divert a comet, seed a colony, terraform: the SimCity loop at planet scale.
 - **True f64 floating-origin** for a single uninterrupted coordinate zoom (ethersim's open item).
 - **Deeper civilization** — economies, conflict, tech trees, players; a world is a seed you can share.
 

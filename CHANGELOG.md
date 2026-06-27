@@ -14,6 +14,10 @@ All notable changes to this project are documented here.
   **toast** announces the strike from any scale.
 - New plumbing: `Regime.stepBackground` (advance cross-scale agents while off-screen),
   `SimClock.realDt` (wall-clock effect timing), `Civilization.impact` / `populationCentroid`.
+- **Impact reaches the city scale too** — the surface regime subscribes to impacts: a strike
+  flattens a blast zone of buildings to scorched rubble (per-block `damage` that knocks height down
+  and tints it dark), drops a ground scar + shock ring, and the city rebuilds from the ashes as
+  `damage` decays over time. The coupling now registers across all four scales at once.
 
 ### Added — surface regime (fourth scale)
 - **Surface regime** — dive past the globe into a SimCity-scale coastal city: instanced buildings
