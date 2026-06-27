@@ -21,7 +21,7 @@ import {
 } from 'three';
 import type { SimClock } from '../core/clock';
 import type { FocusTarget, InspectorInfo, Regime } from '../core/regime';
-import { glowTexture } from '../render/sprites';
+import { glowTexture, ringTexture } from '../render/sprites';
 import { setOpacityDeep } from '../render/opacity';
 import { planetPosition, orbitPath } from './data/kepler';
 import { PLANETS, SUN, type PlanetData } from './data/planets';
@@ -45,6 +45,9 @@ export class SolarRegime implements Regime {
   private sun!: Mesh;
   private readonly targets: FocusTarget[] = [];
   private readonly comets: CometField;
+  private earthMarker?: Sprite; // pulsing "defend this" reticle, shown during a game
+  private defenseOn = false;
+  private markerPhase = 0;
 
   constructor(bus: WorldBus) {
     this.buildSun();
@@ -78,6 +81,8 @@ export class SolarRegime implements Regime {
   /** survival mode: comets arrive on their own */
   setDefenseMode(on: boolean): void {
     this.comets.setDefense(on);
+    this.defenseOn = on;
+    if (this.earthMarker) this.earthMarker.visible = on;
   }
 
   defenseStats(): DefenseStats {
@@ -146,6 +151,17 @@ export class SolarRegime implements Regime {
       );
       this.object3d.add(line);
 
+      if (data.id === 'earth') {
+        const marker = new Sprite(
+          new SpriteMaterial({ map: ringTexture(new Color(0x6ad6ff)), blending: AdditiveBlending, depthWrite: false, depthTest: false, transparent: true }),
+        );
+        marker.scale.setScalar(0.5);
+        marker.visible = false;
+        marker.renderOrder = 2;
+        mesh.add(marker);
+        this.earthMarker = marker;
+      }
+
       const body: Body = { data, mesh, pos: new Vector3() };
       this.bodies.push(body);
 
@@ -180,6 +196,11 @@ export class SolarRegime implements Regime {
       b.mesh.rotation.y += 0.01; // gentle spin for life
     }
     this.sun.rotation.y += 0.002;
+
+    if (this.defenseOn && this.earthMarker) {
+      this.markerPhase += clock.realDt;
+      this.earthMarker.scale.setScalar(0.46 + 0.09 * Math.sin(this.markerPhase * 4));
+    }
   }
 
   // comets fly even when the solar system isn't the visible scale, so a strike

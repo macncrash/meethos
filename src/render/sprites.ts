@@ -28,6 +28,27 @@ export function glowTexture(color = new Color(0xffffff), size = 128): Texture {
   return tex;
 }
 
+/** A hollow ring — a targeting reticle billboard (e.g. "defend this planet"). */
+export function ringTexture(color = new Color(0x4ad6c8), size = 128): Texture {
+  const key = `ring:${color.getHexString()}:${size}`;
+  const hit = cache.get(key);
+  if (hit) return hit;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const r = size / 2;
+  const { r: cr, g: cg, b: cb } = color;
+  const rgb = `${Math.round(cr * 255)}, ${Math.round(cg * 255)}, ${Math.round(cb * 255)}`;
+  ctx.strokeStyle = `rgba(${rgb}, 0.95)`;
+  ctx.lineWidth = size * 0.045;
+  ctx.beginPath();
+  ctx.arc(r, r, r * 0.78, 0, Math.PI * 2);
+  ctx.stroke();
+  const tex = new CanvasTexture(canvas);
+  cache.set(key, tex);
+  return tex;
+}
+
 /** A round, soft-edged dot used as the point-sprite for starfields. */
 export function dotTexture(size = 64): Texture {
   const key = `dot:${size}`;
