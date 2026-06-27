@@ -29,6 +29,10 @@ magnitude, handed across by a scale manager.
   solar system. It homes in and the strike registers at *every* scale at once: a glowing crater on
   the globe, a civilization population crash, and — dive to the city — whole districts flattened to
   rubble that rebuild from the ashes as you run time forward. The scales talk to each other.
+- **A decision, not a cutscene** — an inbound comet raises a red **INBOUND** warning with a live
+  distance readout. Press **d** (or **Deflect**) while it's still far enough out and you nudge it
+  onto a miss — Earth is saved. Wait past the point of no return and it's too late. Speeding time
+  shortens your reaction window: real tension, real agency.
 
 One **SimClock** drives everything; the time-rate ladder spans `1 hr/s` → `1 Myr/s`. Scroll to zoom,
 drag to orbit, double-click a body to dive in; scroll back out to rise a scale.
@@ -63,9 +67,10 @@ See [`docs/architecture.md`](docs/architecture.md) for the design notes and
 
 ## Roadmap
 
-- **More coupling** — comet strikes already register at all four scales; next: stellar aging that
-  dims the planet, climate that feeds the civilization, history that feeds back upward.
-- **Player agency** — divert a comet, seed a colony, terraform: the SimCity loop at planet scale.
+- **More agency** — comet deflection is the first decision; next: seed a colony, terraform, a budget
+  and consequences — the SimCity loop at planet scale.
+- **More coupling** — strikes already register at all four scales; next: stellar aging that dims the
+  planet, climate that feeds the civilization, history that feeds back upward.
 - **True f64 floating-origin** for a single uninterrupted coordinate zoom (ethersim's open item).
 - **Deeper civilization** — economies, conflict, tech trees, players; a world is a seed you can share.
 

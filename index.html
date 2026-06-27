@@ -18,6 +18,13 @@
     <!-- Top-center: cross-scale event toast -->
     <div id="toast" hidden></div>
 
+    <!-- Inbound-comet threat warning + deflect action -->
+    <div id="warning" hidden>
+      <span class="pulse">☄ INBOUND</span>
+      <span id="warning-dist">— AU</span>
+      <button id="deflect-btn" title="Deflect the comet (press d)">⟲ Deflect</button>
+    </div>
+
     <!-- Bottom-center: time + speed controls -->
     <footer id="hud">
       <div id="clock">
@@ -34,7 +41,7 @@
       <div id="stats"></div>
     </footer>
 
-    <div id="hint">scroll to zoom · drag to orbit · double-click a body to dive in · <b>c</b> sends a comet</div>
+    <div id="hint">scroll to zoom · drag to orbit · double-click a body to dive in · <b>c</b> send a comet · <b>d</b> deflect</div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

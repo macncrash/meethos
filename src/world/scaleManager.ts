@@ -12,6 +12,7 @@ import { GalaxyRegime } from '../regimes/galaxy';
 import { SolarRegime } from '../regimes/solar';
 import { EarthRegime } from '../regimes/earth';
 import { SurfaceRegime } from '../regimes/surface';
+import type { DeflectResult } from '../regimes/comets';
 import type { WorldBus } from './bus';
 
 const DIVE_FACTOR = 2.6; // dive when camera closer than focus.radius × this
@@ -175,6 +176,16 @@ export class ScaleManager {
   /** launch a comet at Earth (cross-scale coupling) from anywhere in the chain */
   launchComet(): void {
     this.solar.launchComet();
+  }
+
+  /** AU distance of the nearest inbound comet threatening Earth, or null */
+  threatDistance(): number | null {
+    return this.solar.threatDistance();
+  }
+
+  /** deflect the nearest inbound comet (player agency) */
+  deflectComet(): DeflectResult {
+    return this.solar.deflectComet();
   }
 
   update(clock: SimClock, realDt: number): void {

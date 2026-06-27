@@ -24,7 +24,7 @@ import { glowTexture } from '../render/sprites';
 import { setOpacityDeep } from '../render/opacity';
 import { planetPosition, orbitPath } from './data/kepler';
 import { PLANETS, SUN, type PlanetData } from './data/planets';
-import { CometField } from './comets';
+import { CometField, type DeflectResult } from './comets';
 import type { WorldBus } from '../world/bus';
 
 interface Body {
@@ -57,6 +57,16 @@ export class SolarRegime implements Regime {
   /** launch a comet aimed at Earth (cross-scale coupling) */
   launchComet(): void {
     this.comets.launch();
+  }
+
+  /** AU distance of the nearest inbound (undeflected) comet, or null if none */
+  threatDistance(): number | null {
+    return this.comets.nearestThreatDist();
+  }
+
+  /** deflect the nearest inbound comet, if there's still time */
+  deflectComet(): DeflectResult {
+    return this.comets.deflectNearest();
   }
 
   private buildSun(): void {

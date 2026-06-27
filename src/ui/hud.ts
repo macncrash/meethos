@@ -14,6 +14,8 @@ export class Hud {
   private readonly rateLabel = byId('rate-label');
   private readonly stats = byId('stats');
   private readonly toast = byId('toast');
+  private readonly warning = byId('warning');
+  private readonly warningDist = byId('warning-dist');
   private toastTimer = 0;
 
   constructor(
@@ -23,6 +25,7 @@ export class Hud {
   ) {
     this.wireTransport();
     byId('comet-btn').addEventListener('click', () => this.fireComet());
+    byId('deflect-btn').addEventListener('click', () => this.deflect());
     bus.onImpact((e) => {
       const sev = e.energy > 0.75 ? 'Catastrophic' : e.energy > 0.5 ? 'Major' : 'Significant';
       this.showToast(`☄ ${sev} impact on Earth — civilization set back`);
@@ -39,6 +42,20 @@ export class Hud {
     }
     this.manager.launchComet();
     this.showToast('☄ Comet inbound toward Earth…', 2600);
+  }
+
+  /** player agency: try to deflect the incoming comet */
+  deflect(): void {
+    switch (this.manager.deflectComet()) {
+      case 'deflected':
+        this.showToast('✓ Comet deflected — Earth is safe', 3200);
+        break;
+      case 'too-late':
+        this.showToast('✗ Too late — impact unavoidable', 3200);
+        break;
+      case 'none':
+        break; // nothing inbound
+    }
   }
 
   private showToast(msg: string, ms = 4200): void {
@@ -98,6 +115,15 @@ export class Hud {
 
     this.stardate.textContent = formatStardate(this.clock.seconds);
     this.rateLabel.textContent = this.clock.rateLabel;
+
+    // inbound-comet threat warning
+    const threat = this.manager.threatDistance();
+    if (threat !== null) {
+      this.warning.hidden = false;
+      this.warningDist.textContent = `${threat.toFixed(1)} AU`;
+    } else {
+      this.warning.hidden = true;
+    }
 
     const info = this.manager.focus.info(this.clock);
     const rows = info.rows

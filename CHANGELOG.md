@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added — player agency (deflect the comet)
+- An inbound comet is now a **decision**: a red **INBOUND** HUD warning shows the nearest threat's
+  live distance, and **d** / the **Deflect** button nudges it onto a miss (it turns green and sails
+  past) — *if* it's still beyond the point of no return (1.4 AU). Too close and it's "too late".
+- Comets slowed to give reaction time; deflected comets switch from homing to free flight.
+  `CometField.nearestThreatDist` / `deflectNearest`, surfaced through the ScaleManager.
+
 ### Added — cross-scale coupling (comet strikes)
 - A **WorldBus** lets scales talk. Press **c** / the ☄ button to launch a comet in the solar regime;
   it homes on Earth (sim-time motion, substepped so it can't tunnel through), draws a sun-anti tail,

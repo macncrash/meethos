@@ -47,9 +47,10 @@ const manager = new ScaleManager(scene, camera, controls, bus);
 const hud = new Hud(simClock, manager, bus);
 manager.onChange = () => hud.rebuild();
 
-// keyboard: 'c' launches a comet at Earth
+// keyboard: 'c' launches a comet at Earth, 'd' deflects an incoming one
 window.addEventListener('keydown', (e) => {
   if (e.key === 'c' || e.key === 'C') hud.fireComet();
+  else if (e.key === 'd' || e.key === 'D') hud.deflect();
 });
 
 // ---- pointer picking (click = focus, double-click = dive) ----

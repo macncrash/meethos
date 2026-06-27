@@ -1,7 +1,10 @@
-// Comets — the agent of cross-scale coupling. A comet launched in the solar
-// regime homes on Earth, draws a sun-anti tail, and on contact emits an impact
-// on the WorldBus (which the Earth regime turns into a crater + civilization
-// setback). Motion is in sim-time so it streaks faster when you speed the clock;
+// Comets — the agent of cross-scale coupling AND the player's first real
+// decision. A comet launched in the solar regime homes on Earth and, on contact,
+// emits an impact on the WorldBus (crater + civilization setback + city rubble).
+// But the player can DEFLECT it in time: while it's still far enough out, a nudge
+// sends it sailing harmlessly past. Wait too long and it's too late.
+//
+// Motion is in sim-time (it streaks faster when you speed the clock) and
 // substepped so it can't tunnel through the planet at high rates.
 import {
   AdditiveBlending,
@@ -20,11 +23,16 @@ import { SECONDS_PER_YEAR } from '../core/units';
 import { glowTexture } from '../render/sprites';
 import type { WorldBus } from '../world/bus';
 
-const SPEED_AU_PER_YEAR = 52;
+const SPEED_AU_PER_YEAR = 16; // slow enough to give the player reaction time
 const CAPTURE = 0.16; // AU; > Earth's visual radius so contact is reliable
 const SUBSTEP = 0.06; // AU; keeps fast comets from skipping past Earth
 const SPAWN_RADIUS = 38;
 const MAX_COMETS = 6;
+const MIN_DEFLECT_DIST = 1.4; // AU; inside this it's too late to deflect
+const UP = new Vector3(0, 1, 0);
+const DEFLECT_TINT = 0x8dffa6;
+
+export type DeflectResult = 'deflected' | 'too-late' | 'none';
 
 interface Comet {
   pos: Vector3;
@@ -34,6 +42,8 @@ interface Comet {
   tail: Line;
   tailPos: Float32Array;
   alive: boolean;
+  deflected: boolean;
+  vel: Vector3; // free-flight direction once deflected (normalized)
 }
 
 export class CometField {
@@ -85,7 +95,45 @@ export class CometField {
     );
     this.group.add(tail);
 
-    this.comets.push({ pos, energy, ageYears: 0, head, tail, tailPos, alive: true });
+    this.comets.push({ pos, energy, ageYears: 0, head, tail, tailPos, alive: true, deflected: false, vel: new Vector3() });
+  }
+
+  /** distance (AU) of the nearest still-threatening comet to Earth, or null if none */
+  nearestThreatDist(): number | null {
+    let best: number | null = null;
+    for (const c of this.comets) {
+      if (!c.alive || c.deflected) continue;
+      const d = c.pos.distanceTo(this.earth);
+      if (best === null || d < best) best = d;
+    }
+    return best;
+  }
+
+  /** deflect the nearest inbound comet, if there's still time */
+  deflectNearest(): DeflectResult {
+    let target: Comet | null = null;
+    let bestDist = Infinity;
+    for (const c of this.comets) {
+      if (!c.alive || c.deflected) continue;
+      const d = c.pos.distanceTo(this.earth);
+      if (d < bestDist) {
+        bestDist = d;
+        target = c;
+      }
+    }
+    if (!target) return 'none';
+    if (bestDist < MIN_DEFLECT_DIST) return 'too-late';
+
+    // send it on a tangent that clears Earth, then let it fly free
+    const radial = this.dir.copy(target.pos).sub(this.earth).normalize();
+    const tangent = new Vector3().crossVectors(radial, UP);
+    if (tangent.lengthSq() < 1e-6) tangent.set(1, 0, 0);
+    tangent.normalize();
+    target.vel.copy(tangent).multiplyScalar(0.9).addScaledVector(radial, 0.5).normalize();
+    target.deflected = true;
+    (target.head.material as SpriteMaterial).color.set(DEFLECT_TINT);
+    (target.tail.material as LineBasicMaterial).color.set(DEFLECT_TINT);
+    return 'deflected';
   }
 
   /** advance every comet — called every frame regardless of which regime is visible */
@@ -93,13 +141,17 @@ export class CometField {
     if (this.comets.length === 0) return;
     this.earthAt(this.earth, clock.seconds);
     const deltaYears = clock.dt / SECONDS_PER_YEAR;
-    const total = Math.min(SPEED_AU_PER_YEAR * deltaYears, 80);
+    const total = Math.min(SPEED_AU_PER_YEAR * deltaYears, 30);
 
     for (const c of this.comets) {
       if (!c.alive) continue;
       c.ageYears += deltaYears;
 
-      if (total > 0) {
+      if (c.deflected) {
+        // free flight along its escape vector — no homing, no impact
+        c.pos.addScaledVector(c.vel, total);
+        if (c.pos.length() > 70 || c.ageYears > 120) c.alive = false;
+      } else if (total > 0) {
         const nsub = Math.max(1, Math.ceil(total / SUBSTEP));
         const step = total / nsub;
         for (let s = 0; s < nsub; s++) {
@@ -111,8 +163,8 @@ export class CometField {
           }
           c.pos.addScaledVector(this.dir.divideScalar(dist), Math.min(step, dist));
         }
+        if (c.ageYears > 120) c.alive = false; // straggler cleanup
       }
-      if (c.ageYears > 80) c.alive = false; // straggler cleanup (homing should hit first)
 
       // visuals: head + a tail pointing away from the Sun (origin)
       c.head.position.copy(c.pos);
