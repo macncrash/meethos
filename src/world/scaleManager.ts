@@ -56,6 +56,7 @@ export class ScaleManager {
   onChange: (() => void) | null = null;
 
   private readonly solar: SolarRegime;
+  private readonly universe: UniverseRegime;
 
   constructor(
     private readonly scene: Scene,
@@ -70,6 +71,7 @@ export class ScaleManager {
     const surface = new SurfaceRegime(bus);
     const starsystem = new StarSystemRegime();
     this.solar = solar;
+    this.universe = universe;
     this.chain = [
       { regime: universe, parentRegimeId: null, parentFocusId: null, mainChildId: 'galaxy' },
       { regime: galaxy, parentRegimeId: 'universe', parentFocusId: 'home-galaxy', mainChildId: 'solar' },
@@ -210,6 +212,15 @@ export class ScaleManager {
     this.currentFocus = endFocus;
     this.controls.enabled = false;
     this.onChange?.();
+  }
+
+  /** rewind to the Big Bang and watch the cosmic web form (only at the cosmos scale) */
+  bigBang(): void {
+    if (this.currentId === 'universe') this.universe.playBigBang();
+  }
+
+  cosmicInfo(): { atCosmos: boolean; forming: boolean; ageGyr: number } {
+    return { atCosmos: this.currentId === 'universe', forming: this.universe.isForming, ageGyr: this.universe.cosmicAgeGyr };
   }
 
   /** launch a comet at Earth (cross-scale coupling) from anywhere in the chain */

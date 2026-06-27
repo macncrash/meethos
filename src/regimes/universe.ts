@@ -6,6 +6,7 @@ import {
   BufferAttribute,
   BufferGeometry,
   Color,
+  DynamicDrawUsage,
   Group,
   LineBasicMaterial,
   LineSegments,
@@ -34,9 +35,22 @@ export class UniverseRegime implements Regime {
   readonly object3d = new Group();
 
   private readonly homePos = new Vector3();
+  private readonly homeFinal = new Vector3();
+  private readonly homeInitial = new Vector3();
   private readonly targets: FocusTarget[] = [];
   private readonly homeMarker: Sprite;
+  private home!: Sprite;
   private phase = 0;
+
+  // Big Bang → structure formation
+  private points!: Points;
+  private galaxyMat!: ReturnType<typeof createGlowPointsMaterial>;
+  private livePos!: Float32Array;
+  private finalPos!: Float32Array;
+  private initialPos!: Float32Array;
+  private cosmicAge = 1; // 0 = Big Bang, 1 = present day
+  private forming = false;
+  private bbFlash?: Sprite;
 
   constructor(seed = 0xc05) {
     const rng = mulberry32(seed);
@@ -46,13 +60,16 @@ export class UniverseRegime implements Regime {
     this.buildFilaments(nodes);
     this.buildGalaxies(rng, nodes);
 
+    this.homeFinal.copy(this.homePos);
+    this.homeInitial.copy(this.homePos).multiplyScalar(0.03);
+
     // the Milky Way — a brighter blob you dive into, with a findable reticle
-    const home = new Sprite(
+    this.home = new Sprite(
       new SpriteMaterial({ map: glowTexture(new Color(0xeaf2ff)), blending: AdditiveBlending, depthWrite: false, transparent: true }),
     );
-    home.scale.setScalar(7);
-    home.position.copy(this.homePos);
-    this.object3d.add(home);
+    this.home.scale.setScalar(7);
+    this.home.position.copy(this.homePos);
+    this.object3d.add(this.home);
 
     this.homeMarker = new Sprite(
       new SpriteMaterial({ map: ringTexture(new Color(0x6ad6ff)), blending: AdditiveBlending, depthWrite: false, depthTest: false, transparent: true, opacity: 0.7 }),
@@ -135,16 +152,25 @@ export class UniverseRegime implements Regime {
       sizes[i] = 1.3 + rng() * rng() * 4.2; // mostly small, a few bright
     }
 
+    // keep buffers for the Big Bang animation: galaxies start near a point and
+    // expand out to their web positions as cosmic time advances.
+    this.livePos = positions;
+    this.finalPos = positions.slice();
+    this.initialPos = new Float32Array(GALAXY_COUNT * 3);
+    for (let i = 0; i < this.initialPos.length; i++) this.initialPos[i] = positions[i]! * 0.03;
+
     const geom = new BufferGeometry();
-    geom.setAttribute('position', new BufferAttribute(positions, 3));
+    const posAttr = new BufferAttribute(positions, 3);
+    posAttr.setUsage(DynamicDrawUsage);
+    geom.setAttribute('position', posAttr);
     geom.setAttribute('acolor', new BufferAttribute(colors, 3));
     geom.setAttribute('size', new BufferAttribute(sizes, 1));
-    const mat = createGlowPointsMaterial(dotTexture());
-    mat.uniforms.uScale!.value = 720; // big enough to read at the cosmic framing distance
-    mat.uniforms.uMaxSize!.value = 54;
-    const points = new Points(geom, mat);
-    points.frustumCulled = false;
-    this.object3d.add(points);
+    this.galaxyMat = createGlowPointsMaterial(dotTexture());
+    this.galaxyMat.uniforms.uScale!.value = 720; // big enough to read at the cosmic framing distance
+    this.galaxyMat.uniforms.uMaxSize!.value = 54;
+    this.points = new Points(geom, this.galaxyMat);
+    this.points.frustumCulled = false;
+    this.object3d.add(this.points);
   }
 
   private buildTargets(): void {
@@ -181,8 +207,57 @@ export class UniverseRegime implements Regime {
     });
   }
 
+  /** rewind to the Big Bang and let the cosmic web form again */
+  playBigBang(): void {
+    this.cosmicAge = 0;
+    this.forming = true;
+    if (!this.bbFlash) {
+      this.bbFlash = new Sprite(
+        new SpriteMaterial({ map: glowTexture(new Color(0xfff0d8)), blending: AdditiveBlending, depthWrite: false, depthTest: false, transparent: true }),
+      );
+      this.bbFlash.renderOrder = 3;
+      this.object3d.add(this.bbFlash);
+    }
+    this.bbFlash.visible = true;
+    this.applyFormation(0);
+  }
+
+  get cosmicAgeGyr(): number {
+    return this.cosmicAge * 13.8;
+  }
+
+  get isForming(): boolean {
+    return this.forming;
+  }
+
+  private applyFormation(age: number): void {
+    const e = age * age * (3 - 2 * age); // smoothstep expansion
+    for (let i = 0; i < this.livePos.length; i++) {
+      this.livePos[i] = this.initialPos[i]! + (this.finalPos[i]! - this.initialPos[i]!) * e;
+    }
+    (this.points.geometry.getAttribute('position') as BufferAttribute).needsUpdate = true;
+    this.galaxyMat.uniforms.uOpacity!.value = 0.15 + 0.85 * age; // galaxies light up as they form
+    this.homePos.copy(this.homeInitial).lerp(this.homeFinal, e);
+    this.home.position.copy(this.homePos);
+    this.homeMarker.position.copy(this.homePos);
+    if (this.bbFlash) {
+      const f = Math.max(0, 1 - age / 0.22); // bright bang that fades fast
+      this.bbFlash.scale.setScalar(6 + 60 * (1 - f));
+      (this.bbFlash.material as SpriteMaterial).opacity = f;
+      if (f <= 0) this.bbFlash.visible = false;
+    }
+  }
+
   step(clock: SimClock): void {
     this.phase += clock.realDt;
+    if (this.forming) {
+      this.cosmicAge = Math.min(1, this.cosmicAge + clock.realDt / 7);
+      this.applyFormation(this.cosmicAge);
+      if (this.cosmicAge >= 1) {
+        this.forming = false;
+        this.galaxyMat.uniforms.uOpacity!.value = 1;
+      }
+    }
     this.homeMarker.scale.setScalar(11 + 1.5 * Math.sin(this.phase * 3));
   }
 

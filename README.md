@@ -17,7 +17,8 @@ magnitude, handed across by a scale manager.
 ## The demo (current vertical slice)
 
 - **Cosmos** — a cosmic web of ~3,200 galaxies along filaments around voids; the Milky Way is one
-  highlighted node. Dive in to fall to the galaxy.
+  highlighted node. Dive in to fall to the galaxy — or hit **✦ Big Bang** to rewind to t=0 and watch
+  the galaxies expand from a single point and clump into the web over 13.8 Gyr.
 - **Galaxy** — a ~24k-star log-spiral with differential rotation; our Sun is highlighted, and a
   dozen named **neighbor stars** are divable — each opens its own **procedurally-generated planetary
   system** (different star type, planet count, and worlds every time).

@@ -13,9 +13,12 @@ All notable changes to this project are documented here.
   now shows the real ancestral path plus the main-line forward path; the game's "frame the solar
   system" works from anywhere, including inside a foreign star system.
 
-### Added — the Cosmos scale
+### Added — the Cosmos scale + the Big Bang
 - A new outermost **UniverseRegime**: a cosmic web of ~3,200 galaxies along filaments around voids,
   with the Milky Way highlighted. The chain is now Cosmos → Milky Way → Solar System → Earth → City.
+- **✦ Big Bang** (a button shown only at the Cosmos scale): rewinds cosmic time to t=0 and plays
+  **structure formation** — galaxies expand from a single bright point and clump into the web over
+  ~7 s, with a live cosmic-age readout climbing 0 → 13.8 Gyr.
 
 ### Changed — make Defend Earth actually fun
 - Starting a run now **frames the solar system** (where the comets are) and sets a reactable

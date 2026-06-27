@@ -143,6 +143,19 @@ html, body {
 #defense-score { color: var(--ink-dim); font-size: 12px; white-space: nowrap; }
 #defense-score b { color: var(--ink); font-weight: 600; }
 
+#bigbang-btn {
+  border: 1px solid rgba(190, 150, 255, 0.45);
+  background: rgba(170, 130, 255, 0.12);
+  color: #d9c6ff;
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 12px;
+  white-space: nowrap;
+}
+#bigbang-btn:hover { border-color: #b48aff; background: rgba(170, 130, 255, 0.24); color: #fff; }
+
 #toast {
   position: fixed;
   top: 108px;

@@ -21,6 +21,7 @@ export class Hud {
   private readonly warningDist = byId('warning-dist');
   private readonly deflectBtn = byId('deflect-btn');
   private readonly defenseBtn = byId('defense-btn');
+  private readonly bigbangBtn = byId('bigbang-btn');
   private readonly gamebar = byId('gamebar');
   private readonly healthFill = byId('health-fill');
   private readonly gameStats = byId('game-stats');
@@ -38,6 +39,10 @@ export class Hud {
     byId('comet-btn').addEventListener('click', () => this.fireComet());
     this.deflectBtn.addEventListener('click', () => this.deflect());
     this.defenseBtn.addEventListener('click', () => this.toggleDefense());
+    this.bigbangBtn.addEventListener('click', () => {
+      this.manager.bigBang();
+      this.showToast('✦ The Big Bang — 13.8 billion years in a breath', 3200);
+    });
     byId('restart-btn').addEventListener('click', () => this.startGame());
     bus.onImpact((e) => {
       const sev = e.energy > 0.75 ? 'Catastrophic' : e.energy > 0.5 ? 'Major' : 'Significant';
@@ -168,7 +173,16 @@ export class Hud {
       if (this.toastTimer <= 0) this.toast.classList.remove('show');
     }
 
-    this.stardate.textContent = formatStardate(this.clock.seconds);
+    // Big Bang control + cosmic-age readout, only at the Cosmos scale
+    const cos = this.manager.cosmicInfo();
+    this.bigbangBtn.hidden = !cos.atCosmos;
+    if (cos.atCosmos && cos.forming) {
+      this.era.textContent = 'COSMIC TIME';
+      this.stardate.textContent = `${cos.ageGyr.toFixed(1)} Gyr`;
+    } else {
+      if (cos.atCosmos) this.era.textContent = this.manager.active.label.toUpperCase();
+      this.stardate.textContent = formatStardate(this.clock.seconds);
+    }
     this.rateLabel.textContent = this.clock.rateLabel;
 
     // inbound-comet threat warning
