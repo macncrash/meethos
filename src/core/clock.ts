@@ -8,6 +8,9 @@ export class SimClock {
   seconds = 0;
   /** simulated seconds advanced this frame (0 when paused) */
   dt = 0;
+  /** real wall-clock seconds this frame — for cinematic effects that should run
+   *  at a steady pace regardless of the sim time-rate (impact flashes, etc.) */
+  realDt = 0;
   paused = false;
   private rateIndex = DEFAULT_RATE_INDEX;
 
@@ -26,6 +29,7 @@ export class SimClock {
   /** advance by a real-time delta (seconds), clamped so a long stall can't explode the sim */
   tick(realDt: number): void {
     const clamped = Math.min(realDt, 0.1);
+    this.realDt = clamped;
     this.dt = this.paused ? 0 : clamped * this.rate;
     this.seconds += this.dt;
   }

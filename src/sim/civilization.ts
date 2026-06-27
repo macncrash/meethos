@@ -144,6 +144,50 @@ export class Civilization {
     return best;
   }
 
+  /** Population-weighted centroid direction (globe-local unit vector), or null if empty.
+   *  Used to aim impacts at the inhabited heartland so the coupling is actually felt. */
+  populationCentroid(out = new Vector3()): Vector3 | null {
+    if (this.settlements.length === 0) return null;
+    out.set(0, 0, 0);
+    let w = 0;
+    for (const s of this.settlements) {
+      out.addScaledVector(s.dir, s.pop);
+      w += s.pop;
+    }
+    if (w <= 0 || out.lengthSq() < 1e-9) return null;
+    return out.normalize();
+  }
+
+  /** A bolide strike at `dir` (globe-local unit vector). Wipes settlements near
+   *  ground zero and decimates the fringe — a real setback the player can watch. */
+  impact(dir: Vector3, energy: number): { destroyed: number; killed: number } {
+    const angRadius = 0.2 + energy * 0.55; // radians
+    const cosR = Math.cos(angRadius);
+    const survivors: Settlement[] = [];
+    let destroyed = 0;
+    let killed = 0;
+    for (const s of this.settlements) {
+      const d = s.dir.dot(dir);
+      if (d <= cosR) {
+        survivors.push(s); // outside the blast
+        continue;
+      }
+      const closeness = (d - cosR) / (1 - cosR); // 0 at edge … 1 at ground zero
+      if (closeness > 0.35) {
+        destroyed++;
+        killed += s.pop;
+        continue; // vaporized
+      }
+      killed += s.pop * 0.8;
+      s.pop *= 0.2; // fringe survivors, gutted
+      survivors.push(s);
+    }
+    this.settlements.length = 0;
+    this.settlements.push(...survivors);
+    this.recomputeTotals();
+    return { destroyed, killed: Math.round(killed) };
+  }
+
   private recomputeTotals(): void {
     let total = 0;
     for (const s of this.settlements) total += s.pop;

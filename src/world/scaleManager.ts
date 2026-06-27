@@ -12,6 +12,7 @@ import { GalaxyRegime } from '../regimes/galaxy';
 import { SolarRegime } from '../regimes/solar';
 import { EarthRegime } from '../regimes/earth';
 import { SurfaceRegime } from '../regimes/surface';
+import type { WorldBus } from './bus';
 
 const DIVE_FACTOR = 2.6; // dive when camera closer than focus.radius × this
 const ASCEND_FACTOR = 2.4; // ascend when farther than overview × this
@@ -46,15 +47,19 @@ export class ScaleManager {
   /** notified whenever the active regime or focus changes (UI hook) */
   onChange: (() => void) | null = null;
 
+  private readonly solar: SolarRegime;
+
   constructor(
     private readonly scene: Scene,
     private readonly camera: PerspectiveCamera,
     private readonly controls: OrbitControls,
+    bus: WorldBus,
   ) {
     const galaxy = new GalaxyRegime();
-    const solar = new SolarRegime();
-    const earth = new EarthRegime();
+    const solar = new SolarRegime(bus);
+    const earth = new EarthRegime(bus);
     const surface = new SurfaceRegime();
+    this.solar = solar;
     this.chain = [
       { regime: galaxy, parentFocusId: null },
       { regime: solar, parentFocusId: 'sol-star' },
@@ -167,7 +172,15 @@ export class ScaleManager {
     this.onChange?.();
   }
 
+  /** launch a comet at Earth (cross-scale coupling) from anywhere in the chain */
+  launchComet(): void {
+    this.solar.launchComet();
+  }
+
   update(clock: SimClock, realDt: number): void {
+    // cross-scale agents (comets in flight) advance regardless of the visible scale
+    for (const link of this.chain) link.regime.stepBackground?.(clock);
+
     if (this.transition) {
       this.advanceTransition(clock, realDt);
       return;

@@ -24,12 +24,16 @@ import { glowTexture } from '../render/sprites';
 import { setOpacityDeep } from '../render/opacity';
 import { planetPosition, orbitPath } from './data/kepler';
 import { PLANETS, SUN, type PlanetData } from './data/planets';
+import { CometField } from './comets';
+import type { WorldBus } from '../world/bus';
 
 interface Body {
   data: PlanetData;
   mesh: Mesh;
   readonly pos: Vector3;
 }
+
+const EARTH_DATA = PLANETS.find((p) => p.id === 'earth')!;
 
 export class SolarRegime implements Regime {
   readonly id = 'solar';
@@ -39,11 +43,20 @@ export class SolarRegime implements Regime {
   private readonly bodies: Body[] = [];
   private sun!: Mesh;
   private readonly targets: FocusTarget[] = [];
+  private readonly comets: CometField;
 
-  constructor() {
+  constructor(bus: WorldBus) {
     this.buildSun();
     this.buildPlanets();
     this.object3d.name = 'solar';
+    this.comets = new CometField(this.object3d, bus, (out, seconds) =>
+      planetPosition(EARTH_DATA, seconds, out),
+    );
+  }
+
+  /** launch a comet aimed at Earth (cross-scale coupling) */
+  launchComet(): void {
+    this.comets.launch();
   }
 
   private buildSun(): void {
@@ -142,6 +155,12 @@ export class SolarRegime implements Regime {
       b.mesh.rotation.y += 0.01; // gentle spin for life
     }
     this.sun.rotation.y += 0.002;
+  }
+
+  // comets fly even when the solar system isn't the visible scale, so a strike
+  // can land on Earth while you watch from the surface or the globe.
+  stepBackground(clock: SimClock): void {
+    this.comets.step(clock);
   }
 
   focusTargets(): FocusTarget[] {

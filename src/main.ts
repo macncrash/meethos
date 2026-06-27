@@ -16,6 +16,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SimClock } from './core/clock';
 import type { FocusTarget } from './core/regime';
 import { ScaleManager } from './world/scaleManager';
+import { WorldBus } from './world/bus';
 import { Hud } from './ui/hud';
 import { createBackdropStars } from './render/backdrop';
 
@@ -40,10 +41,16 @@ controls.zoomSpeed = 1.2;
 controls.rotateSpeed = 0.55;
 
 const simClock = new SimClock();
-const manager = new ScaleManager(scene, camera, controls);
+const bus = new WorldBus();
+const manager = new ScaleManager(scene, camera, controls, bus);
 
-const hud = new Hud(simClock, manager);
+const hud = new Hud(simClock, manager, bus);
 manager.onChange = () => hud.rebuild();
+
+// keyboard: 'c' launches a comet at Earth
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'c' || e.key === 'C') hud.fireComet();
+});
 
 // ---- pointer picking (click = focus, double-click = dive) ----
 const raycaster = new Raycaster();

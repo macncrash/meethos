@@ -36,6 +36,9 @@ export interface Regime {
 
   /** advance simulation. `clock.seconds` is absolute; `clock.dt` is this frame. */
   step(clock: SimClock): void;
+  /** optional: advance even when this regime ISN'T the visible scale — for
+   *  cross-scale agents in flight (e.g. a comet heading for Earth). */
+  stepBackground?(clock: SimClock): void;
 
   /** all selectable bodies at this scale */
   focusTargets(): FocusTarget[];

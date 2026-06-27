@@ -15,6 +15,9 @@
     <!-- Top-right: focus / info readout -->
     <aside id="inspector" hidden></aside>
 
+    <!-- Top-center: cross-scale event toast -->
+    <div id="toast" hidden></div>
+
     <!-- Bottom-center: time + speed controls -->
     <footer id="hud">
       <div id="clock">
@@ -27,10 +30,11 @@
         <span id="rate-label">1×</span>
         <button data-rate="faster" title="Faster">»</button>
       </div>
+      <button id="comet-btn" title="Send a comet at Earth (press c)">☄ Comet</button>
       <div id="stats"></div>
     </footer>
 
-    <div id="hint">scroll to zoom · drag to orbit · double-click a body to dive in</div>
+    <div id="hint">scroll to zoom · drag to orbit · double-click a body to dive in · <b>c</b> sends a comet</div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -6,13 +6,17 @@ import {
   BackSide,
   BufferAttribute,
   BufferGeometry,
+  CircleGeometry,
   Color,
+  DoubleSide,
   Group,
   LineBasicMaterial,
   LineSegments,
   Mesh,
   MeshBasicMaterial,
   Points,
+  Quaternion,
+  RingGeometry,
   ShaderMaterial,
   Sprite,
   SpriteMaterial,
@@ -27,6 +31,17 @@ import { setOpacityDeep } from '../render/opacity';
 import { createGlowPointsMaterial } from '../render/pointsMaterial';
 import { PlanetField } from '../world/planetField';
 import { Civilization, eraColor, MAX_SETTLEMENTS } from '../sim/civilization';
+import type { WorldBus, ImpactEvent } from '../world/bus';
+
+const Y_AXIS = new Vector3(0, 1, 0);
+const FROM_Z = new Vector3(0, 0, 1);
+const MAX_CRATERS = 14;
+
+interface Shockwave {
+  mesh: Mesh;
+  age: number; // wall-clock seconds
+  life: number;
+}
 
 const GLOBE_R = 1;
 const SETTLE_R = 1.008; // markers float just above the ground
@@ -54,10 +69,14 @@ export class EarthRegime implements Regime {
   private readonly linkPositions: Float32Array;
   private refreshAccum = 0;
   private readonly targets: FocusTarget[] = [];
+  private readonly craters: Mesh[] = [];
+  private readonly shocks: Shockwave[] = [];
+  private lastImpact: { energy: number; killed: number; atYear: number } | null = null;
 
-  constructor() {
+  constructor(bus: WorldBus) {
     this.civ = new Civilization(this.field);
     this.object3d.name = 'earth';
+    bus.onImpact((e) => this.onImpact(e));
 
     // globe
     this.globe = new Mesh(
@@ -130,7 +149,9 @@ export class EarthRegime implements Regime {
           ['Population', formatPop(this.civ.totalPopulation)],
           ['Era', this.civ.era],
         ],
-        blurb: 'A procedurally-grown world. Speed time up and watch civilization spread across the continents.',
+        blurb: this.lastImpact
+          ? `Impact event — ${formatPop(this.lastImpact.killed)} lost, civilization set back. The crater scars the surface below.`
+          : 'A procedurally-grown world. Speed time up and watch civilization spread across the continents.',
       }),
     });
     this.targets.push({
@@ -154,6 +175,8 @@ export class EarthRegime implements Regime {
     const years = Math.min(clock.dt / (SECONDS_PER_DAY * 365.25), MAX_CIV_YEARS_PER_FRAME);
     this.civ.advance(years);
 
+    this.animateShocks(clock.realDt);
+
     // globe spins once per simulated day
     this.globe.rotation.y = (clock.seconds / SECONDS_PER_DAY) * Math.PI * 2;
 
@@ -168,6 +191,76 @@ export class EarthRegime implements Regime {
     if (this.refreshAccum >= CIV_REFRESH_SEC) {
       this.refreshAccum = 0;
       this.refreshCivBuffers();
+    }
+  }
+
+  // --- cross-scale coupling: a comet from the solar regime strikes here ---
+
+  private onImpact(e: ImpactEvent): void {
+    // Aim at the inhabited heartland (with jitter) so a strike is actually felt;
+    // if the world is empty, un-spin the incoming direction onto the globe's
+    // rotating frame so the crater still lands where the comet came in.
+    const heartland = this.civ.populationCentroid(new Vector3());
+    let localDir: Vector3;
+    if (heartland) {
+      localDir = heartland
+        .add(new Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(0.5))
+        .normalize();
+    } else {
+      const rotAtImpact = (e.atSeconds / SECONDS_PER_DAY) * Math.PI * 2;
+      localDir = e.dir.clone().applyAxisAngle(Y_AXIS, -rotAtImpact).normalize();
+    }
+
+    const { killed } = this.civ.impact(localDir, e.energy);
+    this.lastImpact = { energy: e.energy, killed, atYear: Math.round(this.civ.years) };
+
+    const quat = new Quaternion().setFromUnitVectors(FROM_Z, localDir);
+
+    // permanent dark crater, parented to the globe so it rotates with the surface
+    const r = 0.05 + e.energy * 0.13;
+    const crater = new Mesh(
+      new CircleGeometry(r, 28),
+      new MeshBasicMaterial({ color: 0x241208, transparent: true, opacity: 0.92, side: DoubleSide }),
+    );
+    crater.position.copy(localDir).multiplyScalar(GLOBE_R * 1.003);
+    crater.quaternion.copy(quat);
+    this.globe.add(crater);
+    this.craters.push(crater);
+    if (this.craters.length > MAX_CRATERS) {
+      const old = this.craters.shift()!;
+      this.globe.remove(old);
+      old.geometry.dispose();
+      (old.material as MeshBasicMaterial).dispose();
+    }
+
+    // transient ember shockwave that expands and fades
+    const ring = new Mesh(
+      new RingGeometry(r * 0.6, r, 40),
+      new MeshBasicMaterial({ color: 0xff7a2a, transparent: true, opacity: 0.9, side: DoubleSide, blending: AdditiveBlending, depthWrite: false }),
+    );
+    ring.position.copy(localDir).multiplyScalar(GLOBE_R * 1.004);
+    ring.quaternion.copy(quat);
+    this.globe.add(ring);
+    this.shocks.push({ mesh: ring, age: 0, life: 2.2 });
+
+    this.refreshCivBuffers();
+  }
+
+  private animateShocks(realDt: number): void {
+    for (let i = this.shocks.length - 1; i >= 0; i--) {
+      const s = this.shocks[i]!;
+      s.age += realDt;
+      const t = s.age / s.life;
+      if (t >= 1) {
+        this.globe.remove(s.mesh);
+        s.mesh.geometry.dispose();
+        (s.mesh.material as MeshBasicMaterial).dispose();
+        this.shocks.splice(i, 1);
+        continue;
+      }
+      const scale = 1 + t * 6;
+      s.mesh.scale.setScalar(scale);
+      (s.mesh.material as MeshBasicMaterial).opacity = (1 - t) * 0.9;
     }
   }
 

@@ -4,6 +4,17 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added — cross-scale coupling (comet strikes)
+- A **WorldBus** lets scales talk. Press **c** / the ☄ button to launch a comet in the solar regime;
+  it homes on Earth (sim-time motion, substepped so it can't tunnel through), draws a sun-anti tail,
+  and on contact emits an impact event.
+- The Earth regime (always subscribed, even when off-screen) turns an impact into a **crater** +
+  expanding ember **shockwave** on the globe and a real **civilization setback** (settlements near
+  ground zero wiped, fringe decimated) — aimed at the population heartland so it's felt. A HUD
+  **toast** announces the strike from any scale.
+- New plumbing: `Regime.stepBackground` (advance cross-scale agents while off-screen),
+  `SimClock.realDt` (wall-clock effect timing), `Civilization.impact` / `populationCentroid`.
+
 ### Added — surface regime (fourth scale)
 - **Surface regime** — dive past the globe into a SimCity-scale coastal city: instanced buildings
   that rise and a development front that sprawls outward as time advances, zoned downtown /
