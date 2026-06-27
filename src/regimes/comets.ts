@@ -46,10 +46,24 @@ interface Comet {
   vel: Vector3; // free-flight direction once deflected (normalized)
 }
 
+export interface DefenseStats {
+  on: boolean;
+  defended: number;
+  impacts: number;
+}
+
 export class CometField {
   private readonly comets: Comet[] = [];
   private readonly earth = new Vector3();
   private readonly dir = new Vector3();
+
+  // survival mode: comets arrive on their own and you must keep Earth alive
+  private defense = false;
+  private spawnTimer = 0;
+  private spawnInterval = 28; // sim-years until the next auto-spawn
+  private autoSpawned = 0;
+  private defended = 0;
+  private impacts = 0;
 
   constructor(
     private readonly group: Object3D,
@@ -60,6 +74,22 @@ export class CometField {
 
   get count(): number {
     return this.comets.length;
+  }
+
+  /** toggle survival mode; turning it on starts a fresh defense run */
+  setDefense(on: boolean): void {
+    this.defense = on;
+    if (on) {
+      this.spawnTimer = 0;
+      this.spawnInterval = 28;
+      this.autoSpawned = 0;
+      this.defended = 0;
+      this.impacts = 0;
+    }
+  }
+
+  get defenseStats(): DefenseStats {
+    return { on: this.defense, defended: this.defended, impacts: this.impacts };
   }
 
   /** launch a comet from the system edge, aimed (it homes) at Earth */
@@ -131,6 +161,7 @@ export class CometField {
     tangent.normalize();
     target.vel.copy(tangent).multiplyScalar(0.9).addScaledVector(radial, 0.5).normalize();
     target.deflected = true;
+    this.defended++;
     (target.head.material as SpriteMaterial).color.set(DEFLECT_TINT);
     (target.tail.material as LineBasicMaterial).color.set(DEFLECT_TINT);
     return 'deflected';
@@ -138,9 +169,21 @@ export class CometField {
 
   /** advance every comet — called every frame regardless of which regime is visible */
   step(clock: SimClock): void {
+    const deltaYears = clock.dt / SECONDS_PER_YEAR;
+
+    // survival mode: spawn fresh threats on a (gently escalating) timer
+    if (this.defense && deltaYears > 0) {
+      this.spawnTimer += deltaYears;
+      if (this.spawnTimer >= this.spawnInterval) {
+        this.spawnTimer = 0;
+        this.autoSpawned++;
+        this.spawnInterval = Math.max(10, 30 - this.autoSpawned * 1.3) * (0.7 + Math.random() * 0.6);
+        this.launch();
+      }
+    }
+
     if (this.comets.length === 0) return;
     this.earthAt(this.earth, clock.seconds);
-    const deltaYears = clock.dt / SECONDS_PER_YEAR;
     const total = Math.min(SPEED_AU_PER_YEAR * deltaYears, 30);
 
     for (const c of this.comets) {
@@ -188,6 +231,7 @@ export class CometField {
   private impact(c: Comet, seconds: number): void {
     const dir = c.pos.clone().sub(this.earth).normalize(); // surface point that took the hit
     this.bus.emitImpact({ dir, energy: c.energy, atSeconds: seconds });
+    this.impacts++;
     c.alive = false;
   }
 

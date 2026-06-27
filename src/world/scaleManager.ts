@@ -12,7 +12,7 @@ import { GalaxyRegime } from '../regimes/galaxy';
 import { SolarRegime } from '../regimes/solar';
 import { EarthRegime } from '../regimes/earth';
 import { SurfaceRegime } from '../regimes/surface';
-import type { DeflectResult } from '../regimes/comets';
+import type { DeflectResult, DefenseStats } from '../regimes/comets';
 import type { WorldBus } from './bus';
 
 const DIVE_FACTOR = 2.6; // dive when camera closer than focus.radius × this
@@ -186,6 +186,15 @@ export class ScaleManager {
   /** deflect the nearest inbound comet (player agency) */
   deflectComet(): DeflectResult {
     return this.solar.deflectComet();
+  }
+
+  /** survival mode: comets arrive on their own */
+  setDefenseMode(on: boolean): void {
+    this.solar.setDefenseMode(on);
+  }
+
+  defenseStats(): DefenseStats {
+    return this.solar.defenseStats();
   }
 
   update(clock: SimClock, realDt: number): void {

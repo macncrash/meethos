@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added — Defense mode (survival game)
+- Toggle **🛡 Defense** and comets spawn autonomously on an escalating timer; a HUD scoreboard
+  tracks **defended vs hit**. Missed comets crash the civilization and flatten the city (existing
+  coupling); deflected ones keep it growing. Built on `CometField.setDefense` / `defenseStats`,
+  surfaced through the ScaleManager and HUD.
+
 ### Added — player agency (deflect the comet)
 - An inbound comet is now a **decision**: a red **INBOUND** HUD warning shows the nearest threat's
   live distance, and **d** / the **Deflect** button nudges it onto a miss (it turns green and sails

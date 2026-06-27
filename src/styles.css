@@ -119,6 +119,27 @@ html, body {
 }
 #comet-btn:hover { border-color: #ff8a4a; background: rgba(255, 130, 70, 0.24); color: #fff; }
 
+#defense-btn {
+  border: 1px solid rgba(122, 168, 255, 0.4);
+  background: rgba(122, 168, 255, 0.1);
+  color: var(--accent2);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 12px;
+  white-space: nowrap;
+}
+#defense-btn:hover { border-color: var(--accent2); background: rgba(122, 168, 255, 0.2); color: #fff; }
+#defense-btn.active {
+  border-color: var(--accent);
+  background: rgba(74, 214, 200, 0.22);
+  color: #fff;
+  box-shadow: 0 0 12px rgba(74, 214, 200, 0.35);
+}
+#defense-score { color: var(--ink-dim); font-size: 12px; white-space: nowrap; }
+#defense-score b { color: var(--ink); font-weight: 600; }
+
 #toast {
   position: fixed;
   top: 64px;

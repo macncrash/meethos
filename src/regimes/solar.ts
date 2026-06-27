@@ -24,7 +24,7 @@ import { glowTexture } from '../render/sprites';
 import { setOpacityDeep } from '../render/opacity';
 import { planetPosition, orbitPath } from './data/kepler';
 import { PLANETS, SUN, type PlanetData } from './data/planets';
-import { CometField, type DeflectResult } from './comets';
+import { CometField, type DeflectResult, type DefenseStats } from './comets';
 import type { WorldBus } from '../world/bus';
 
 interface Body {
@@ -67,6 +67,15 @@ export class SolarRegime implements Regime {
   /** deflect the nearest inbound comet, if there's still time */
   deflectComet(): DeflectResult {
     return this.comets.deflectNearest();
+  }
+
+  /** survival mode: comets arrive on their own */
+  setDefenseMode(on: boolean): void {
+    this.comets.setDefense(on);
+  }
+
+  defenseStats(): DefenseStats {
+    return this.comets.defenseStats;
   }
 
   private buildSun(): void {

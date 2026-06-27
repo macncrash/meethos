@@ -16,6 +16,8 @@ export class Hud {
   private readonly toast = byId('toast');
   private readonly warning = byId('warning');
   private readonly warningDist = byId('warning-dist');
+  private readonly defenseBtn = byId('defense-btn');
+  private readonly defenseScore = byId('defense-score');
   private toastTimer = 0;
 
   constructor(
@@ -26,6 +28,7 @@ export class Hud {
     this.wireTransport();
     byId('comet-btn').addEventListener('click', () => this.fireComet());
     byId('deflect-btn').addEventListener('click', () => this.deflect());
+    this.defenseBtn.addEventListener('click', () => this.toggleDefense());
     bus.onImpact((e) => {
       const sev = e.energy > 0.75 ? 'Catastrophic' : e.energy > 0.5 ? 'Major' : 'Significant';
       this.showToast(`☄ ${sev} impact on Earth — civilization set back`);
@@ -55,6 +58,22 @@ export class Hud {
         break;
       case 'none':
         break; // nothing inbound
+    }
+  }
+
+  /** survival mode: comets arrive on their own; keep Earth's civilization alive */
+  private toggleDefense(): void {
+    const on = !this.manager.defenseStats().on;
+    this.manager.setDefenseMode(on);
+    this.defenseBtn.classList.toggle('active', on);
+    this.defenseScore.hidden = !on;
+    if (on) {
+      if (this.clock.paused) {
+        this.clock.togglePause();
+        const pause = byId('transport').querySelector('[data-rate="pause"]');
+        if (pause) pause.textContent = '❚❚';
+      }
+      this.showToast('🛡 Defense engaged — comets incoming. Deflect them (d).', 3600);
     }
   }
 
@@ -123,6 +142,12 @@ export class Hud {
       this.warningDist.textContent = `${threat.toFixed(1)} AU`;
     } else {
       this.warning.hidden = true;
+    }
+
+    // survival scoreboard
+    const def = this.manager.defenseStats();
+    if (def.on) {
+      this.defenseScore.innerHTML = `🛡 <b>${def.defended}</b> defended · <b>${def.impacts}</b> hit`;
     }
 
     const info = this.manager.focus.info(this.clock);
