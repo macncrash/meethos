@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+    <title>meethos · true-scale zoom</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+    <style>
+      #title {
+        position: fixed; top: 16px; left: 18px; z-index: 10;
+        font-size: 12px; color: var(--ink-dim); letter-spacing: 0.03em; max-width: 60vw;
+      }
+      #title b { color: var(--accent); }
+      #readout {
+        position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 10;
+        padding: 8px 18px; background: var(--panel); border: 1px solid var(--panel-line);
+        border-radius: 12px; backdrop-filter: blur(8px); font-size: 12px; color: var(--ink-dim);
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="stage"></canvas>
+    <div id="title"><b>meethos</b> — true-scale, floating-origin zoom · one physical coordinate system, AU → light-years, no cross-fade</div>
+    <div id="readout">—</div>
+    <script type="module" src="/src/zoomMain.ts"></script>
+  </body>
+</html>
