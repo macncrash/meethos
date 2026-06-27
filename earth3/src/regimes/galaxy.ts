@@ -25,7 +25,6 @@ import { makeLabel } from '../render/label';
 import { setOpacityDeep } from '../render/opacity';
 
 const STAR_COUNT = 24_000;
-const ARMS = 4;
 const DISK_RADIUS = 120;
 const SUN_RADIUS = 55; // galactocentric distance of Sol, in render units
 const SUN_PERIOD_SEC = 225e6 * SECONDS_PER_YEAR; // galactic year ≈ 225 Myr
@@ -92,24 +91,69 @@ export class GalaxyRegime implements Regime {
   }
 
   private seedStars(rng: Rng, colors: Float32Array): void {
+    // Barred spiral, Milky-Way-like: a spheroidal bulge, a central BAR, two
+    // dominant arms (Scutum-Centaurus, Perseus) + two minor (Sagittarius, Norma),
+    // each a log spiral with a real-ish pitch angle. Arms are bluer (star
+    // formation); bulge/bar are older and redder.
+    const BAR_ANGLE = 0.5; // bar orientation (arbitrary absolute frame)
+    const BAR_LEN = 26;
+    const BAR_W = 7;
+    const ARMS_DEF = [
+      { base: 0.0, pitch: 0.25, w: 0.32 }, // Scutum-Centaurus (major)
+      { base: Math.PI, pitch: 0.2, w: 0.32 }, // Perseus (major)
+      { base: Math.PI * 0.5, pitch: 0.31, w: 0.13 }, // Sagittarius (minor)
+      { base: Math.PI * 1.5, pitch: 0.24, w: 0.13 }, // Norma / Outer (minor)
+    ];
+    const armPick: number[] = [];
+    let acc = 0;
+    for (const a of ARMS_DEF) { acc += a.w; armPick.push(acc); }
+
     const c = new Color();
     for (let i = 0; i < STAR_COUNT; i++) {
-      // radius with central concentration
-      const r = DISK_RADIUS * Math.pow(rng(), 0.55);
-      const arm = Math.floor(rng() * ARMS);
-      const armAngle = (arm / ARMS) * Math.PI * 2;
-      // log-spiral winding + per-star scatter that tightens toward the core
-      const winding = 2.4 * Math.log(r + 1);
-      const scatter = gaussian(rng) * (0.18 + 1.6 / (r + 2));
-      const a = armAngle + winding + scatter;
-      const y = gaussian(rng) * (0.6 + 3.0 / (r + 2)); // thin disk, fat bulge
+      const u = rng();
+      let r: number;
+      let ang: number;
+      let y: number;
+      let hot = false;
+
+      if (u < 0.13) {
+        // bulge — compact spheroid
+        r = Math.abs(gaussian(rng)) * 7 + 1.5;
+        ang = rng() * Math.PI * 2;
+        y = gaussian(rng) * 5.5;
+      } else if (u < 0.22) {
+        // central bar — elongated, rotated by BAR_ANGLE
+        const t = (rng() * 2 - 1) * BAR_LEN;
+        const w = gaussian(rng) * BAR_W;
+        const x = t * Math.cos(BAR_ANGLE) - w * Math.sin(BAR_ANGLE);
+        const z = t * Math.sin(BAR_ANGLE) + w * Math.cos(BAR_ANGLE);
+        r = Math.hypot(x, z);
+        ang = Math.atan2(z, x);
+        y = gaussian(rng) * 2.5;
+      } else if (u < 0.96) {
+        // spiral arm — pick one (weighted), log-spiral winding by its pitch
+        const p = rng() * acc;
+        let k = 0;
+        while (k < armPick.length - 1 && p > armPick[k]!) k++;
+        const arm = ARMS_DEF[k]!;
+        r = DISK_RADIUS * Math.pow(rng(), 0.6);
+        const winding = Math.log(r + 1) / Math.tan(arm.pitch);
+        const scatter = gaussian(rng) * (0.13 + 1.4 / (r / 18 + 1));
+        ang = arm.base + winding + scatter;
+        y = gaussian(rng) * (0.5 + 2.5 / (r / 12 + 1)); // thin disk, thicker inner
+        hot = rng() < 0.18; // young blue stars cluster in arms
+      } else {
+        // diffuse disk field
+        r = DISK_RADIUS * Math.sqrt(rng());
+        ang = rng() * Math.PI * 2;
+        y = gaussian(rng) * 1.6;
+      }
 
       this.baseR[i] = r;
-      this.baseA[i] = a;
+      this.baseA[i] = ang;
       this.baseY[i] = y;
 
-      // cooler stars dominate; a few hot blue giants
-      const t = rng() < 0.04 ? 9000 + rng() * 20000 : 3200 + rng() * 3500;
+      const t = hot ? 8000 + rng() * 16000 : u < 0.22 ? 3200 + rng() * 2200 : 3200 + rng() * 3800;
       blackbodyColor(t, c);
       const o = i * 3;
       colors[o] = c.r;

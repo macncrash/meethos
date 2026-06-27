@@ -27,6 +27,7 @@ import { glowTexture } from '../render/sprites';
 import { setOpacityDeep } from '../render/opacity';
 import { planetPosition, orbitPath } from './data/kepler';
 import type { PlanetData } from './data/planets';
+import { EXO_SYSTEMS } from './data/exoplanets';
 
 interface Body {
   data: PlanetData;
@@ -78,8 +79,49 @@ export class StarSystemRegime implements Regime {
     glow.scale.setScalar(this.starVisualRadius * 9);
     star.add(glow);
 
-    // the planets
-    this.planetCount = 2 + Math.floor(rng() * 6);
+    // the planets — REAL ones from the exoplanet archive when we know this host,
+    // otherwise a procedural system.
+    const real = EXO_SYSTEMS[name];
+    const defs: PlanetData[] = [];
+    if (real) {
+      real.forEach((ex, i) => {
+        defs.push({
+          id: `p${i}`,
+          label: ex.name,
+          a: ex.a,
+          e: ex.e ?? 0.04,
+          periodYears: ex.periodYears,
+          inclDeg: rng() * 4,
+          nodeDeg: rng() * 360,
+          argPeriDeg: rng() * 360,
+          meanAnomDeg: rng() * 360,
+          obliquityDeg: rng() * 30,
+          rotationHours: 6 + rng() * 30,
+          radiusKm: ex.radiusEarth * 6371,
+          visualRadius: Math.min(0.15, 0.025 + ex.radiusEarth * 0.011),
+          color: (ex.gas ? GAS : ROCKY)[(rng() * 5) | 0]!,
+          blurb: ex.gas ? 'A real, confirmed gas giant.' : 'A real, confirmed world (NASA Exoplanet Archive).',
+        });
+      });
+    } else {
+      let a = 0.4 + rng() * 0.3;
+      const n = 2 + Math.floor(rng() * 6);
+      for (let i = 0; i < n; i++) {
+        a *= 1.5 + rng() * 0.6;
+        const gas = a > 2.2 && rng() < 0.7;
+        const radiusKm = gas ? 22000 + rng() * 60000 : 2200 + rng() * 8000;
+        defs.push({
+          id: `p${i}`, label: `${name} ${roman(i + 1)}`, a, e: rng() * 0.12,
+          periodYears: Math.sqrt(a * a * a), inclDeg: rng() * 6, nodeDeg: rng() * 360,
+          argPeriDeg: rng() * 360, meanAnomDeg: rng() * 360, obliquityDeg: rng() * 45, rotationHours: 6 + rng() * 30,
+          radiusKm, visualRadius: Math.min(0.16, (gas ? 0.07 : 0.03) + radiusKm / 700000),
+          color: (gas ? GAS : ROCKY)[(rng() * 5) | 0]!,
+          blurb: gas ? 'A gas giant, banded and stormbound.' : 'A rocky world, silent and waiting.',
+        });
+      }
+    }
+    this.planetCount = defs.length;
+
     const targets: FocusTarget[] = [];
     targets.push({
       id: 'star',
@@ -90,35 +132,16 @@ export class StarSystemRegime implements Regime {
         title: name,
         rows: [
           ['Class', this.starInfo],
-          ['Planets', String(this.planetCount)],
+          ['Planets', `${this.planetCount}${real ? ' (real)' : ''}`],
         ],
-        blurb: 'Another star, another system — worlds that have never had a name until now.',
+        blurb: real
+          ? 'A real planetary system from the NASA Exoplanet Archive — these worlds were actually detected.'
+          : 'Another star, another system — worlds that have never had a name until now.',
       }),
     });
 
-    let a = 0.4 + rng() * 0.3;
-    for (let i = 0; i < this.planetCount; i++) {
-      a *= 1.5 + rng() * 0.6; // geometric spacing outward
-      const gas = a > 2.2 && rng() < 0.7;
-      const radiusKm = gas ? 22000 + rng() * 60000 : 2200 + rng() * 8000;
-      const data: PlanetData = {
-        id: `p${i}`,
-        label: `${name} ${roman(i + 1)}`,
-        a,
-        e: rng() * 0.12,
-        periodYears: Math.sqrt(a * a * a), // Kepler's 3rd, ~solar mass
-        inclDeg: rng() * 6,
-        nodeDeg: rng() * 360,
-        argPeriDeg: rng() * 360,
-        meanAnomDeg: rng() * 360,
-        obliquityDeg: rng() * 45,
-        rotationHours: 6 + rng() * 30,
-        radiusKm,
-        visualRadius: Math.min(0.16, (gas ? 0.07 : 0.03) + radiusKm / 700000),
-        color: (gas ? GAS : ROCKY)[(rng() * 5) | 0]!,
-        blurb: gas ? 'A gas giant, banded and stormbound.' : 'A rocky world, silent and waiting.',
-      };
-
+    for (const data of defs) {
+      const gas = data.radiusKm > 15000;
       const mesh = new Mesh(
         new SphereGeometry(data.visualRadius, 24, 24),
         new MeshBasicMaterial({ color: data.color }),
