@@ -4,6 +4,17 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Changed — make Defend Earth actually fun
+- Starting a run now **frames the solar system** (where the comets are) and sets a reactable
+  **1 yr/s** pace, so you can see and react to the action instead of watching a number.
+- **Click a comet to deflect it** (skill targeting via a click ray), in addition to the D key
+  (which now targets the nearest *savable* comet, ignoring lost causes).
+- **Comet variety**: normal / fast (less reaction time) / heavy (slow, devastating), each with its
+  own color, speed, size, and damage.
+- **Juice**: green flash when you deflect, orange flash on impact.
+- **Tuned for a real difficulty curve**: first comet at ~4s, escalating siege; a skilled player
+  lasts ~2.5 min, doing nothing ~40s. Deflect cooldown 2.5 yr.
+
 ### Added — Defend Earth: a win/lose survival game
 - A full game loop over the comet siege: a **health bar** (civilization integrity) that drains on
   impact and regenerates, a **deflector cooldown** so you can be overwhelmed, an escalating spawn

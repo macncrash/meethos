@@ -44,7 +44,7 @@ controls.rotateSpeed = 0.55;
 const simClock = new SimClock();
 const bus = new WorldBus();
 const manager = new ScaleManager(scene, camera, controls, bus);
-const game = new DefenseGame(manager, bus);
+const game = new DefenseGame(manager, bus, simClock);
 
 const hud = new Hud(simClock, manager, bus, game);
 manager.onChange = () => hud.rebuild();
@@ -67,6 +67,9 @@ canvas.addEventListener('pointerdown', (e) => downAt.set(e.clientX, e.clientY));
 
 canvas.addEventListener('click', (e) => {
   if (downAt.distanceTo(new Vector2(e.clientX, e.clientY)) > 5) return; // was a drag
+  pointer.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(pointer, camera);
+  if (hud.tryDeflectAt(raycaster.ray)) return; // clicked a comet — shoot it down
   const target = pick(e);
   if (target) manager.focusOn(target);
 });

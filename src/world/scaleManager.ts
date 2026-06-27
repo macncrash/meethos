@@ -4,7 +4,7 @@
 //
 // Like ethersim's Simulation Manager, it only ever talks to the Regime contract —
 // it never knows what a regime simulates.
-import { Vector3, type PerspectiveCamera, type Scene } from 'three';
+import { Vector3, type PerspectiveCamera, type Ray, type Scene } from 'three';
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { SimClock } from '../core/clock';
 import type { FocusTarget, Regime } from '../core/regime';
@@ -188,6 +188,11 @@ export class ScaleManager {
     return this.solar.deflectComet();
   }
 
+  /** deflect the comet nearest a click ray */
+  deflectCometAt(ray: Ray): DeflectResult {
+    return this.solar.deflectCometAt(ray);
+  }
+
   /** survival mode: comets arrive on their own */
   setDefenseMode(on: boolean): void {
     this.solar.setDefenseMode(on);
@@ -195,6 +200,31 @@ export class ScaleManager {
 
   defenseStats(): DefenseStats {
     return this.solar.defenseStats();
+  }
+
+  /** frame the solar system (where the comets are) for a defense run */
+  frameForDefense(): void {
+    if (this.transition) return;
+    const idx = this.chain.findIndex((l) => l.regime.id === 'solar');
+    if (idx < 0) return;
+    const sun = this.chain[idx]!.regime.defaultFocus()!;
+    if (this.index === idx) {
+      this.focusOn(sun);
+      this.reframeOverview();
+    } else {
+      this.beginTransition(idx, sun);
+    }
+  }
+
+  private reframeOverview(): void {
+    const tgt = this.currentFocus.position(this.scratch).clone();
+    const dir = this.camera.position.clone().sub(this.controls.target);
+    if (dir.lengthSq() < 1e-9) dir.set(0.3, 0.5, 1);
+    dir.normalize();
+    this.controls.target.copy(tgt);
+    this.camera.position.copy(tgt).addScaledVector(dir, this.active.overviewDistance());
+    this.lastFocusPos.copy(tgt);
+    this.controls.update();
   }
 
   update(clock: SimClock, realDt: number): void {

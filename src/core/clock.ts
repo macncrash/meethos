@@ -38,6 +38,12 @@ export class SimClock {
     this.paused = !this.paused;
   }
 
+  /** jump to a specific rung of the ladder (used to set a good pace for the game) */
+  setRateIndex(i: number): void {
+    this.rateIndex = Math.max(0, Math.min(RATE_LADDER.length - 1, i));
+    this.paused = false;
+  }
+
   faster(): void {
     if (this.paused) this.paused = false;
     else this.rateIndex = Math.min(RATE_LADDER.length - 1, this.rateIndex + 1);

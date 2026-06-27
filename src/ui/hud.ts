@@ -4,6 +4,7 @@
 // the DefenseGame for game state — no physics access.
 import type { SimClock } from '../core/clock';
 import { formatStardate } from '../core/units';
+import type { Ray } from 'three';
 import type { ScaleManager } from '../world/scaleManager';
 import type { WorldBus } from '../world/bus';
 import type { DefenseGame } from '../world/defenseGame';
@@ -70,6 +71,23 @@ export class Hud {
         break;
       case 'none':
         break; // nothing inbound
+    }
+  }
+
+  /** click-to-deflect a comet under the ray. Returns true if a comet was targeted. */
+  tryDeflectAt(ray: Ray): boolean {
+    switch (this.game.deflectAt(ray)) {
+      case 'deflected':
+        this.showToast('✓ Comet deflected — Earth is safe', 2400);
+        return true;
+      case 'too-late':
+        this.showToast('✗ Too late — impact unavoidable', 2600);
+        return true;
+      case 'cooldown':
+        this.showToast('⟲ Deflector still recharging…', 1400);
+        return true;
+      case 'none':
+        return false;
     }
   }
 

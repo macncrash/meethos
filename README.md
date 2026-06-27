@@ -33,11 +33,13 @@ magnitude, handed across by a scale manager.
   distance readout. Press **d** (or **Deflect**) while it's still far enough out and you nudge it
   onto a miss — Earth is saved. Wait past the point of no return and it's too late. Speeding time
   shortens your reaction window: real tension, real agency.
-- **Defend Earth (the survival game)** — toggle **🛡 Defend Earth** and comets siege the planet at
-  an escalating pace. A **health bar** (the civilization's integrity) drains with every impact and
-  slowly regenerates; your **deflector has a cooldown**, so you can't stop everything. Survive as
-  long as you can — your score is the **years endured**, with a persistent high score. Eventually
-  the bombardment outpaces you and it's **game over**. Press **Defend again** to retry.
+- **Defend Earth (the survival game)** — hit **🛡 Defend Earth** and it frames the solar system and
+  comets begin streaking in — **normal, fast, and heavy** flavors. **Click a comet** (or press **d**)
+  to deflect it onto a miss; your **deflector has a cooldown**, so you can't stop everything. A
+  **health bar** (the civilization's integrity) drains with every impact and slowly regenerates.
+  The siege **escalates** until it outpaces you — survive as long as you can. Score = **years
+  endured**, with a persistent high score; then **game over → Defend again**. (A skilled run lasts a
+  couple of minutes; ignore it and you're gone in ~40 seconds.)
 
 One **SimClock** drives everything; the time-rate ladder spans `1 hr/s` → `1 Myr/s`. Scroll to zoom,
 drag to orbit, double-click a body to dive in; scroll back out to rise a scale.

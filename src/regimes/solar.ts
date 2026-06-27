@@ -6,6 +6,7 @@ import {
   BufferGeometry,
   Color,
   DoubleSide,
+  type Ray,
   Group,
   LineBasicMaterial,
   LineLoop,
@@ -67,6 +68,11 @@ export class SolarRegime implements Regime {
   /** deflect the nearest inbound comet, if there's still time */
   deflectComet(): DeflectResult {
     return this.comets.deflectNearest();
+  }
+
+  /** deflect the comet nearest a click ray (skill targeting) */
+  deflectCometAt(ray: Ray): DeflectResult {
+    return this.comets.deflectAtRay(ray);
   }
 
   /** survival mode: comets arrive on their own */
