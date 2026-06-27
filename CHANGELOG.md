@@ -4,11 +4,19 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added — Defend Earth: a win/lose survival game
+- A full game loop over the comet siege: a **health bar** (civilization integrity) that drains on
+  impact and regenerates, a **deflector cooldown** so you can be overwhelmed, an escalating spawn
+  rate that eventually outpaces you, a **survival score** (years endured) with a **localStorage high
+  score**, and a **game-over → Defend again** flow. New `DefenseGame` model (`src/world/defenseGame.ts`)
+  driven each frame; HUD renders the bar, score, cooldown, and overlay.
+- Fixed: the `hidden` attribute was being overridden by `display: flex` on the overlay/warning/bar
+  panels (`[hidden] { display: none !important }`), so the game-over overlay now clears on restart.
+
 ### Added — Defense mode (survival game)
-- Toggle **🛡 Defense** and comets spawn autonomously on an escalating timer; a HUD scoreboard
-  tracks **defended vs hit**. Missed comets crash the civilization and flatten the city (existing
-  coupling); deflected ones keep it growing. Built on `CometField.setDefense` / `defenseStats`,
-  surfaced through the ScaleManager and HUD.
+- Toggle defense and comets spawn autonomously on an escalating timer; counters track **defended vs
+  hit**. Missed comets crash the civilization and flatten the city (existing coupling); deflected
+  ones keep it growing. Built on `CometField.setDefense` / `defenseStats`.
 
 ### Added — player agency (deflect the comet)
 - An inbound comet is now a **decision**: a red **INBOUND** HUD warning shows the nearest threat's

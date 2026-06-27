@@ -17,6 +17,7 @@ import { SimClock } from './core/clock';
 import type { FocusTarget } from './core/regime';
 import { ScaleManager } from './world/scaleManager';
 import { WorldBus } from './world/bus';
+import { DefenseGame } from './world/defenseGame';
 import { Hud } from './ui/hud';
 import { createBackdropStars } from './render/backdrop';
 
@@ -43,8 +44,9 @@ controls.rotateSpeed = 0.55;
 const simClock = new SimClock();
 const bus = new WorldBus();
 const manager = new ScaleManager(scene, camera, controls, bus);
+const game = new DefenseGame(manager, bus);
 
-const hud = new Hud(simClock, manager, bus);
+const hud = new Hud(simClock, manager, bus, game);
 manager.onChange = () => hud.rebuild();
 
 // keyboard: 'c' launches a comet at Earth, 'd' deflects an incoming one
@@ -103,6 +105,7 @@ function animate(): void {
   const realDt = frameClock.getDelta();
   simClock.tick(realDt);
   manager.update(simClock, realDt);
+  game.update(simClock);
   hud.tick();
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
@@ -116,4 +119,4 @@ window.addEventListener('resize', () => {
 });
 
 // expose for debugging in the console
-(window as unknown as { meethos: unknown }).meethos = { manager, simClock, scene, camera };
+(window as unknown as { meethos: unknown }).meethos = { manager, simClock, scene, camera, game, hud };

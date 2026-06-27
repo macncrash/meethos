@@ -80,12 +80,18 @@ export class CometField {
   setDefense(on: boolean): void {
     this.defense = on;
     if (on) {
+      this.clear(); // fresh skies for a new run
       this.spawnTimer = 0;
-      this.spawnInterval = 28;
+      this.spawnInterval = 26;
       this.autoSpawned = 0;
       this.defended = 0;
       this.impacts = 0;
     }
+  }
+
+  /** remove every comet currently in flight */
+  clear(): void {
+    for (let i = this.comets.length - 1; i >= 0; i--) this.removeAt(i);
   }
 
   get defenseStats(): DefenseStats {
@@ -177,7 +183,9 @@ export class CometField {
       if (this.spawnTimer >= this.spawnInterval) {
         this.spawnTimer = 0;
         this.autoSpawned++;
-        this.spawnInterval = Math.max(10, 30 - this.autoSpawned * 1.3) * (0.7 + Math.random() * 0.6);
+        // escalate toward a floor BELOW the deflect cooldown, so the siege
+        // eventually outpaces you and the run ends.
+        this.spawnInterval = Math.max(4, 26 - this.autoSpawned * 1.5) * (0.7 + Math.random() * 0.6);
         this.launch();
       }
     }

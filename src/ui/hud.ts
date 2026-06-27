@@ -1,10 +1,12 @@
-// The HUD: breadcrumb, transport (time controls), clock, focus inspector, and the
-// comet launcher + impact toast. It only reads the Regime/FocusTarget contract via
-// the ScaleManager — no physics access.
+// The HUD: breadcrumb, transport (time controls), clock, focus inspector, the
+// comet launcher + impact toast, and the Defense game (health bar, score,
+// game-over). It reads the Regime/FocusTarget contract via the ScaleManager and
+// the DefenseGame for game state — no physics access.
 import type { SimClock } from '../core/clock';
 import { formatStardate } from '../core/units';
 import type { ScaleManager } from '../world/scaleManager';
 import type { WorldBus } from '../world/bus';
+import type { DefenseGame } from '../world/defenseGame';
 
 export class Hud {
   private readonly breadcrumb = byId('breadcrumb');
@@ -16,19 +18,26 @@ export class Hud {
   private readonly toast = byId('toast');
   private readonly warning = byId('warning');
   private readonly warningDist = byId('warning-dist');
+  private readonly deflectBtn = byId('deflect-btn');
   private readonly defenseBtn = byId('defense-btn');
-  private readonly defenseScore = byId('defense-score');
+  private readonly gamebar = byId('gamebar');
+  private readonly healthFill = byId('health-fill');
+  private readonly gameStats = byId('game-stats');
+  private readonly gameover = byId('gameover');
+  private readonly gameoverText = byId('gameover-text');
   private toastTimer = 0;
 
   constructor(
     private readonly clock: SimClock,
     private readonly manager: ScaleManager,
     bus: WorldBus,
+    private readonly game: DefenseGame,
   ) {
     this.wireTransport();
     byId('comet-btn').addEventListener('click', () => this.fireComet());
-    byId('deflect-btn').addEventListener('click', () => this.deflect());
+    this.deflectBtn.addEventListener('click', () => this.deflect());
     this.defenseBtn.addEventListener('click', () => this.toggleDefense());
+    byId('restart-btn').addEventListener('click', () => this.startGame());
     bus.onImpact((e) => {
       const sev = e.energy > 0.75 ? 'Catastrophic' : e.energy > 0.5 ? 'Major' : 'Significant';
       this.showToast(`☄ ${sev} impact on Earth — civilization set back`);
@@ -47,33 +56,42 @@ export class Hud {
     this.showToast('☄ Comet inbound toward Earth…', 2600);
   }
 
-  /** player agency: try to deflect the incoming comet */
+  /** player agency: try to deflect the incoming comet (honors game cooldown) */
   deflect(): void {
-    switch (this.manager.deflectComet()) {
+    switch (this.game.deflect()) {
       case 'deflected':
-        this.showToast('✓ Comet deflected — Earth is safe', 3200);
+        this.showToast('✓ Comet deflected — Earth is safe', 3000);
         break;
       case 'too-late':
-        this.showToast('✗ Too late — impact unavoidable', 3200);
+        this.showToast('✗ Too late — impact unavoidable', 3000);
+        break;
+      case 'cooldown':
+        this.showToast('⟲ Deflector still recharging…', 1600);
         break;
       case 'none':
         break; // nothing inbound
     }
   }
 
-  /** survival mode: comets arrive on their own; keep Earth's civilization alive */
+  /** Defense game: start a run, or stop one in progress. */
   private toggleDefense(): void {
-    const on = !this.manager.defenseStats().on;
-    this.manager.setDefenseMode(on);
-    this.defenseBtn.classList.toggle('active', on);
-    this.defenseScore.hidden = !on;
-    if (on) {
-      if (this.clock.paused) {
-        this.clock.togglePause();
-        const pause = byId('transport').querySelector('[data-rate="pause"]');
-        if (pause) pause.textContent = '❚❚';
-      }
-      this.showToast('🛡 Defense engaged — comets incoming. Deflect them (d).', 3600);
+    this.game.toggle();
+    if (this.game.isPlaying) {
+      this.resumeTime();
+      this.showToast('🛡 Defense engaged — keep Earth alive. Deflect comets (d).', 3600);
+    }
+  }
+
+  private startGame(): void {
+    this.game.start();
+    this.resumeTime();
+  }
+
+  private resumeTime(): void {
+    if (this.clock.paused) {
+      this.clock.togglePause();
+      const pause = byId('transport').querySelector('[data-rate="pause"]');
+      if (pause) pause.textContent = '❚❚';
     }
   }
 
@@ -144,11 +162,7 @@ export class Hud {
       this.warning.hidden = true;
     }
 
-    // survival scoreboard
-    const def = this.manager.defenseStats();
-    if (def.on) {
-      this.defenseScore.innerHTML = `🛡 <b>${def.defended}</b> defended · <b>${def.impacts}</b> hit`;
-    }
+    this.renderGame();
 
     const info = this.manager.focus.info(this.clock);
     const rows = info.rows
@@ -162,6 +176,34 @@ export class Hud {
       .slice(0, 2)
       .map(([k, v]) => `${k} <b>${v}</b>`)
       .join(' · ');
+  }
+
+  private renderGame(): void {
+    const g = this.game;
+    this.defenseBtn.classList.toggle('active', g.isPlaying);
+
+    // live game bar (health + score)
+    this.gamebar.hidden = !g.isPlaying;
+    if (g.isPlaying) {
+      const h = Math.round(g.health);
+      this.healthFill.style.width = `${h}%`;
+      this.healthFill.style.background = h > 50 ? '#4ad6c8' : h > 25 ? '#ffcf6a' : '#ff5a52';
+      this.gameStats.innerHTML = `❤ <b>${h}%</b> · survived <b>${g.score}</b> yr · ✓ <b>${g.defended}</b>`;
+      // deflect button reflects the recharge
+      this.deflectBtn.classList.toggle('cooling', !g.ready);
+      this.deflectBtn.textContent = g.ready ? '⟲ Deflect' : '⟲ …';
+    } else {
+      this.deflectBtn.classList.remove('cooling');
+      this.deflectBtn.textContent = '⟲ Deflect';
+    }
+
+    // game-over overlay
+    this.gameover.hidden = g.state !== 'over';
+    if (g.state === 'over') {
+      this.gameoverText.innerHTML =
+        `Civilization endured <b>${g.score}</b> years before the bombardment broke it.<br>` +
+        `Comets deflected: <b>${g.defended}</b> · Best: <b>${g.highScore}</b> yr`;
+    }
   }
 }
 

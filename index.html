@@ -18,11 +18,26 @@
     <!-- Top-center: cross-scale event toast -->
     <div id="toast" hidden></div>
 
+    <!-- Defense game: health + score bar -->
+    <div id="gamebar" hidden>
+      <div class="health-track"><div id="health-fill"></div></div>
+      <div id="game-stats"></div>
+    </div>
+
     <!-- Inbound-comet threat warning + deflect action -->
     <div id="warning" hidden>
       <span class="pulse">☄ INBOUND</span>
       <span id="warning-dist">— AU</span>
       <button id="deflect-btn" title="Deflect the comet (press d)">⟲ Deflect</button>
+    </div>
+
+    <!-- Defense game-over overlay -->
+    <div id="gameover" hidden>
+      <div class="panel">
+        <h2>Civilization Lost</h2>
+        <p id="gameover-text"></p>
+        <button id="restart-btn">⟳ Defend again</button>
+      </div>
     </div>
 
     <!-- Bottom-center: time + speed controls -->
@@ -38,8 +53,7 @@
         <button data-rate="faster" title="Faster">»</button>
       </div>
       <button id="comet-btn" title="Send a comet at Earth (press c)">☄ Comet</button>
-      <button id="defense-btn" title="Defense mode — comets arrive on their own; keep Earth alive">🛡 Defense</button>
-      <span id="defense-score" hidden></span>
+      <button id="defense-btn" title="Defense — survive a comet siege; keep Earth's civilization alive">🛡 Defend Earth</button>
       <div id="stats"></div>
     </footer>
 

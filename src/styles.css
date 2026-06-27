@@ -11,6 +11,9 @@
 
 * { box-sizing: border-box; }
 
+/* the `hidden` attribute must win over our explicit `display: flex` panels */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   height: 100%;
@@ -142,7 +145,7 @@ html, body {
 
 #toast {
   position: fixed;
-  top: 64px;
+  top: 108px;
   left: 50%;
   transform: translateX(-50%) translateY(-8px);
   padding: 10px 18px;
@@ -162,7 +165,7 @@ html, body {
 /* inbound-comet threat warning */
 #warning {
   position: fixed;
-  top: 64px;
+  top: 60px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -192,8 +195,73 @@ html, body {
   white-space: nowrap;
 }
 #deflect-btn:hover { border-color: #7dffae; background: rgba(90, 230, 150, 0.3); color: #fff; }
+#deflect-btn.cooling { border-color: rgba(140, 150, 170, 0.4); background: rgba(120, 130, 150, 0.12); color: var(--ink-dim); cursor: progress; }
 
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* defense game: health + score bar */
+#gamebar {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  z-index: 19;
+}
+.health-track {
+  width: 280px;
+  height: 9px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--panel-line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+#health-fill {
+  height: 100%;
+  width: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.25s ease, background 0.4s ease;
+}
+#game-stats { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.02em; }
+#game-stats b { color: var(--ink); font-weight: 600; }
+
+/* defense game-over overlay */
+#gameover {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 6, 10, 0.72);
+  backdrop-filter: blur(4px);
+  z-index: 30;
+}
+#gameover .panel {
+  text-align: center;
+  padding: 30px 40px;
+  background: var(--panel);
+  border: 1px solid rgba(255, 90, 70, 0.5);
+  border-radius: 16px;
+  max-width: 420px;
+}
+#gameover h2 { margin: 0 0 12px; color: #ff6a52; font-size: 22px; letter-spacing: 0.04em; }
+#gameover p { margin: 0 0 20px; color: var(--ink); font-size: 13px; line-height: 1.7; }
+#gameover p b { color: var(--accent); }
+#restart-btn {
+  border: 1px solid var(--accent);
+  background: rgba(74, 214, 200, 0.18);
+  color: #fff;
+  border-radius: 9px;
+  padding: 10px 22px;
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 14px;
+}
+#restart-btn:hover { background: rgba(74, 214, 200, 0.34); box-shadow: 0 0 14px rgba(74, 214, 200, 0.4); }
 
 #hint {
   position: fixed;
