@@ -19,6 +19,7 @@ import type { SimClock } from '../core/clock';
 import type { FocusTarget, Regime } from '../core/regime';
 import { mulberry32, gaussian, type Rng } from '../core/rng';
 import { dotTexture, glowTexture, ringTexture } from '../render/sprites';
+import { makeLabel } from '../render/label';
 import { createGlowPointsMaterial } from '../render/pointsMaterial';
 import { setOpacityDeep } from '../render/opacity';
 
@@ -38,6 +39,7 @@ export class UniverseRegime implements Regime {
   private readonly homeFinal = new Vector3();
   private readonly homeInitial = new Vector3();
   private readonly targets: FocusTarget[] = [];
+  private readonly localGroup: Array<{ sprite: Sprite; label: Sprite; offset: Vector3; size: number }> = [];
   private readonly homeMarker: Sprite;
   private home!: Sprite;
   private phase = 0;
@@ -80,6 +82,49 @@ export class UniverseRegime implements Regime {
     this.object3d.add(this.homeMarker);
 
     this.buildTargets();
+    this.buildLocalGroup();
+  }
+
+  // Real Local Group neighbors with real distances/directions (positions scaled
+  // for visibility — at true scale they'd sit on top of the Milky Way node).
+  private buildLocalGroup(): void {
+    const DEG = Math.PI / 180;
+    const GAL = [
+      { name: 'Andromeda (M31)', ra: 10.68, dec: 41.27, mly: 2.5, size: 6, col: 0xcfe0ff, target: true },
+      { name: 'Triangulum (M33)', ra: 23.46, dec: 30.66, mly: 2.73, size: 3.4, col: 0xcfe0ff, target: false },
+      { name: 'LMC', ra: 80.89, dec: -69.76, mly: 0.163, size: 2.2, col: 0xdce4f0, target: false },
+      { name: 'SMC', ra: 13.19, dec: -72.83, mly: 0.2, size: 1.7, col: 0xdce4f0, target: false },
+    ];
+    for (const g of GAL) {
+      const cd = Math.cos(g.dec * DEG);
+      const dir = new Vector3(cd * Math.cos(g.ra * DEG), Math.sin(g.dec * DEG), cd * Math.sin(g.ra * DEG));
+      const offset = dir.multiplyScalar(5 + g.mly * 5);
+      const sprite = new Sprite(
+        new SpriteMaterial({ map: glowTexture(new Color(g.col)), blending: AdditiveBlending, depthWrite: false, transparent: true }),
+      );
+      sprite.scale.setScalar(g.size);
+      this.object3d.add(sprite);
+      const label = makeLabel(g.name, g.col, 0.036);
+      this.object3d.add(label);
+      this.localGroup.push({ sprite, label, offset, size: g.size });
+      if (g.target) {
+        this.targets.push({
+          id: 'andromeda',
+          label: g.name,
+          radius: 3,
+          position: (out) => out.copy(sprite.position),
+          info: () => ({
+            title: 'Andromeda (M31)',
+            rows: [
+              ['Distance', '2.5 Mly (765 kpc)'],
+              ['Approaching', '109 km/s'],
+              ['Merger', '~4.5 Gyr — or 50/50'],
+            ],
+            blurb: 'The nearest large galaxy, and our likely future. The classic "certain collision in ~4.5 Gyr" was revised in 2025 (Sawala et al.) to roughly a coin flip within 10 Gyr — M33 raises the odds, the LMC lowers them.',
+          }),
+        });
+      }
+    }
   }
 
   private buildNodes(rng: Rng): Vector3[] {
@@ -185,9 +230,9 @@ export class UniverseRegime implements Regime {
         rows: [
           ['Type', 'barred spiral'],
           ['Stars', '~100–400 B'],
-          ['Neighbors', 'billions of galaxies'],
+          ['Bound to', 'the Local Group'],
         ],
-        blurb: 'Our galaxy — one node in the cosmic web. Dive in to fall toward home.',
+        blurb: 'Our galaxy — one node in the cosmic web, bound with Andromeda, Triangulum and ~80 dwarfs in the Local Group. Dive in to fall toward home.',
       }),
     });
     this.targets.push({
@@ -259,6 +304,12 @@ export class UniverseRegime implements Regime {
       }
     }
     this.homeMarker.scale.setScalar(11 + 1.5 * Math.sin(this.phase * 3));
+
+    // the Local Group rides with the Milky Way node
+    for (const lg of this.localGroup) {
+      lg.sprite.position.copy(this.homePos).add(lg.offset);
+      lg.label.position.set(lg.sprite.position.x, lg.sprite.position.y + lg.size * 0.6 + 1, lg.sprite.position.z);
+    }
   }
 
   focusTargets(): FocusTarget[] {

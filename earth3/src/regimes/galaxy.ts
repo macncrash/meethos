@@ -21,6 +21,7 @@ import { blackbodyColor } from '../core/color';
 import { mulberry32, gaussian, type Rng } from '../core/rng';
 import { SECONDS_PER_YEAR } from '../core/units';
 import { dotTexture, glowTexture } from '../render/sprites';
+import { makeLabel } from '../render/label';
 import { setOpacityDeep } from '../render/opacity';
 
 const STAR_COUNT = 24_000;
@@ -42,7 +43,8 @@ export class GalaxyRegime implements Regime {
   private readonly sunMarker: Sprite;
   private readonly sunPos = new Vector3();
   private readonly targets: FocusTarget[] = [];
-  private readonly neighbors: Array<{ marker: Sprite; offset: Vector3; pos: Vector3 }> = [];
+  private readonly neighbors: Array<{ marker: Sprite; offset: Vector3; pos: Vector3; label: Sprite }> = [];
+  private solLabel?: Sprite;
 
   constructor(seed = 0xea2743) {
     const rng = mulberry32(seed);
@@ -83,6 +85,8 @@ export class GalaxyRegime implements Regime {
 
     this.buildTargets();
     this.buildNeighbors(rng);
+    this.solLabel = makeLabel('Sol', 0xfff2cc, 0.04);
+    this.object3d.add(this.solLabel);
     this.update(0);
     this.object3d.name = 'galaxy';
   }
@@ -148,41 +152,60 @@ export class GalaxyRegime implements Regime {
     });
   }
 
-  private buildNeighbors(rng: Rng): void {
-    const NAMES = [
-      'Alpha Centauri', 'Sirius', 'Vega', 'Procyon', 'Altair', 'Tau Ceti', 'Wolf 359',
-      'Trappist-1', 'Gliese 581', 'Epsilon Eridani', 'Ross 128', 'Luyten', 'Barnard', 'Kapteyn',
+  private buildNeighbors(_rng: Rng): void {
+    // REAL nearest stars: name, RA/Dec (J2000, deg) → real direction, distance (ly),
+    // effective temperature (K) → real color. Distances are scaled up for visibility
+    // (at true galactic scale these would all sit on top of the Sun).
+    const NEIGHBORS: Array<{ name: string; ra: number; dec: number; ly: number; k: number; sp: string }> = [
+      { name: 'Alpha Centauri', ra: 219.90, dec: -60.83, ly: 4.37, k: 5790, sp: 'G2V+K1V' },
+      { name: 'Barnard’s Star', ra: 269.45, dec: 4.69, ly: 5.96, k: 3130, sp: 'M4V' },
+      { name: 'Wolf 359', ra: 164.12, dec: 7.01, ly: 7.86, k: 2800, sp: 'M6V' },
+      { name: 'Lalande 21185', ra: 165.83, dec: 35.97, ly: 8.31, k: 3550, sp: 'M2V' },
+      { name: 'Sirius', ra: 101.29, dec: -16.72, ly: 8.60, k: 9940, sp: 'A1V' },
+      { name: 'Luyten 726-8', ra: 24.76, dec: -17.95, ly: 8.73, k: 2670, sp: 'M5.5V' },
+      { name: 'Ross 154', ra: 282.46, dec: -23.83, ly: 9.69, k: 3340, sp: 'M3.5V' },
+      { name: 'Ross 248', ra: 355.48, dec: 44.18, ly: 10.30, k: 3000, sp: 'M5V' },
+      { name: 'Epsilon Eridani', ra: 53.23, dec: -9.46, ly: 10.50, k: 5080, sp: 'K2V' },
+      { name: 'Lacaille 9352', ra: 346.47, dec: -35.85, ly: 10.74, k: 3690, sp: 'M1.5V' },
+      { name: 'Ross 128', ra: 176.94, dec: 0.80, ly: 11.01, k: 3190, sp: 'M4V' },
+      { name: '61 Cygni', ra: 316.72, dec: 38.75, ly: 11.40, k: 4530, sp: 'K5V' },
+      { name: 'Procyon', ra: 114.83, dec: 5.22, ly: 11.46, k: 6530, sp: 'F5IV' },
+      { name: 'Tau Ceti', ra: 26.02, dec: -15.94, ly: 11.91, k: 5340, sp: 'G8V' },
     ];
+    const DEG = Math.PI / 180;
+    const DIST_SCALE = 0.16; // render units per ly (exaggerated for visibility)
     const c = new Color();
-    NAMES.forEach((name, i) => {
-      const ang = rng() * Math.PI * 2;
-      const rad = 1.8 + rng() * 5;
-      const offset = new Vector3(Math.cos(ang) * rad, (rng() - 0.5) * 1.6, Math.sin(ang) * rad);
-      const temp = rng() < 0.3 ? 8000 + rng() * 8000 : 3000 + rng() * 3600;
-      blackbodyColor(temp, c);
+    NEIGHBORS.forEach((s, i) => {
+      const cd = Math.cos(s.dec * DEG);
+      // equatorial unit direction (real relative geometry), Y = +Dec
+      const dir = new Vector3(cd * Math.cos(s.ra * DEG), Math.sin(s.dec * DEG), cd * Math.sin(s.ra * DEG));
+      const offset = dir.multiplyScalar(s.ly * DIST_SCALE);
+      blackbodyColor(s.k, c);
       const marker = new Sprite(
         new SpriteMaterial({ map: glowTexture(c.clone()), blending: AdditiveBlending, depthWrite: false, transparent: true }),
       );
-      marker.scale.setScalar(1.3);
+      marker.scale.setScalar(s.k > 7000 ? 1.4 : 0.9); // brighter/larger for hot stars
       this.object3d.add(marker);
-      const neighbor = { marker, offset, pos: new Vector3() };
+      const label = makeLabel(s.name, c.clone().getHex(), 0.034);
+      this.object3d.add(label);
+      const neighbor = { marker, offset, pos: new Vector3(), label };
       this.neighbors.push(neighbor);
 
-      const seed = (0x9e3779b1 * (i + 1)) >>> 0;
+      const seed = (0x9e3779b1 * (i + 7)) >>> 0;
       this.targets.push({
         id: `star${i}`,
-        label: name,
+        label: s.name,
         childRegime: 'starsystem',
         seed,
-        radius: 1.4,
+        radius: 1.1,
         position: (out) => out.copy(neighbor.pos),
         info: () => ({
-          title: name,
+          title: s.name,
           rows: [
-            ['Distance', 'a few ly'],
-            ['Status', 'uncharted'],
+            ['Distance', `${s.ly.toFixed(2)} ly`],
+            ['Class', s.sp],
           ],
-          blurb: 'A neighbor star. Dive in to chart its worlds.',
+          blurb: 'A real neighbor star (direction accurate; distance exaggerated for visibility). Dive in to chart its worlds.',
         }),
       });
     });
@@ -212,7 +235,9 @@ export class GalaxyRegime implements Regime {
     for (const n of this.neighbors) {
       n.pos.copy(this.sunPos).add(n.offset);
       n.marker.position.copy(n.pos);
+      n.label.position.set(n.pos.x, n.pos.y + 0.6, n.pos.z);
     }
+    if (this.solLabel) this.solLabel.position.set(this.sunPos.x, this.sunPos.y + 3, this.sunPos.z);
   }
 
   step(clock: SimClock): void {

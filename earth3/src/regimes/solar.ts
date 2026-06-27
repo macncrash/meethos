@@ -22,6 +22,7 @@ import {
 import type { SimClock } from '../core/clock';
 import type { FocusTarget, InspectorInfo, Regime } from '../core/regime';
 import { glowTexture, ringTexture } from '../render/sprites';
+import { makeLabel } from '../render/label';
 import { setOpacityDeep } from '../render/opacity';
 import { planetPosition, orbitPath } from './data/kepler';
 import { PLANETS, SUN, type PlanetData } from './data/planets';
@@ -32,6 +33,7 @@ interface Body {
   data: PlanetData;
   holder: Group; // positioned at the planet + tilted by its obliquity
   mesh: Mesh; // spins about the (tilted) local Y at the true sidereal rate
+  label: Sprite;
   readonly pos: Vector3;
 }
 
@@ -110,6 +112,10 @@ export class SolarRegime implements Regime {
     glow.scale.setScalar(SUN.visualRadius * 9);
     this.sun.add(glow);
 
+    const sunLabel = makeLabel('Sun', 0xffe08a);
+    sunLabel.position.set(0, SUN.visualRadius * 1.5, 0);
+    this.object3d.add(sunLabel);
+
     this.targets.push({
       id: SUN.id,
       label: SUN.label,
@@ -170,7 +176,10 @@ export class SolarRegime implements Regime {
         this.earthMarker = marker;
       }
 
-      const body: Body = { data, holder, mesh, pos: new Vector3() };
+      const label = makeLabel(data.label, data.color);
+      this.object3d.add(label);
+
+      const body: Body = { data, holder, mesh, label, pos: new Vector3() };
       this.bodies.push(body);
 
       this.targets.push({
@@ -201,6 +210,7 @@ export class SolarRegime implements Regime {
     for (const b of this.bodies) {
       planetPosition(b.data, clock.seconds, b.pos);
       b.holder.position.copy(b.pos);
+      b.label.position.set(b.pos.x, b.pos.y + b.data.visualRadius * 1.6, b.pos.z);
       // true sidereal spin about the tilted axis (signed → retrograde for Venus/Uranus)
       const rotSec = b.data.rotationHours * 3600;
       b.mesh.rotation.y = (clock.seconds / rotSec) * Math.PI * 2;
