@@ -109,7 +109,10 @@ export class StarSystemRegime implements Regime {
         periodYears: Math.sqrt(a * a * a), // Kepler's 3rd, ~solar mass
         inclDeg: rng() * 6,
         nodeDeg: rng() * 360,
-        phase: rng() * Math.PI * 2,
+        argPeriDeg: rng() * 360,
+        meanAnomDeg: rng() * 360,
+        obliquityDeg: rng() * 45,
+        rotationHours: 6 + rng() * 30,
         radiusKm,
         visualRadius: Math.min(0.16, (gas ? 0.07 : 0.03) + radiusKm / 700000),
         color: (gas ? GAS : ROCKY)[(rng() * 5) | 0]!,

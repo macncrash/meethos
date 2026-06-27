@@ -3,17 +3,20 @@
 // settlements ignite, grow, and spread across the continents over centuries.
 import {
   AdditiveBlending,
+  AmbientLight,
   BackSide,
   BufferAttribute,
   BufferGeometry,
   CircleGeometry,
   Color,
+  DirectionalLight,
   DoubleSide,
   Group,
   LineBasicMaterial,
   LineSegments,
   Mesh,
   MeshBasicMaterial,
+  MeshStandardMaterial,
   Points,
   Quaternion,
   RingGeometry,
@@ -31,11 +34,15 @@ import { setOpacityDeep } from '../render/opacity';
 import { createGlowPointsMaterial } from '../render/pointsMaterial';
 import { PlanetField } from '../world/planetField';
 import { Civilization, eraColor, MAX_SETTLEMENTS } from '../sim/civilization';
+import { planetPosition } from './data/kepler';
+import { PLANETS } from './data/planets';
 import type { WorldBus, ImpactEvent } from '../world/bus';
 
 const Y_AXIS = new Vector3(0, 1, 0);
 const FROM_Z = new Vector3(0, 0, 1);
 const MAX_CRATERS = 14;
+const EARTH_DATA = PLANETS.find((p) => p.id === 'earth')!;
+const AXIAL_TILT = (EARTH_DATA.obliquityDeg * Math.PI) / 180; // 23.44°
 
 interface Shockwave {
   mesh: Mesh;
@@ -68,6 +75,8 @@ export class EarthRegime implements Regime {
   private readonly positions: Float32Array;
   private readonly linkPositions: Float32Array;
   private refreshAccum = 0;
+  private readonly sunLight: DirectionalLight;
+  private readonly sunDir = new Vector3();
   private readonly targets: FocusTarget[] = [];
   private readonly craters: Mesh[] = [];
   private readonly shocks: Shockwave[] = [];
@@ -78,12 +87,23 @@ export class EarthRegime implements Regime {
     this.object3d.name = 'earth';
     bus.onImpact((e) => this.onImpact(e));
 
-    // globe
+    // globe — lit (MeshStandard) so the Sun casts a real day/night terminator.
+    // A tilt group leans the spin axis 23.44° (fixed in space → seasons emerge as
+    // Earth orbits); the globe spins about that tilted axis once per sidereal day.
     this.globe = new Mesh(
       new SphereGeometry(GLOBE_R, 64, 48),
-      new MeshBasicMaterial({ map: this.field.texture() }),
+      new MeshStandardMaterial({ map: this.field.texture(), roughness: 1, metalness: 0 }),
     );
-    this.object3d.add(this.globe);
+    const tilt = new Group();
+    tilt.rotation.z = AXIAL_TILT;
+    tilt.add(this.globe);
+    this.object3d.add(tilt);
+
+    // the Sun: a directional light whose direction comes from Earth's real orbit.
+    this.sunLight = new DirectionalLight(0xfff4e6, 2.6);
+    this.object3d.add(this.sunLight);
+    this.object3d.add(this.sunLight.target);
+    this.object3d.add(new AmbientLight(0x223044, 0.5)); // faint earthshine so the night side isn't pure black
 
     // atmosphere shell — a thin rim, not a flood
     const atmo = new Mesh(
@@ -177,8 +197,12 @@ export class EarthRegime implements Regime {
 
     this.animateShocks(clock.realDt);
 
-    // globe spins once per simulated day
+    // globe spins once per sidereal day about its tilted axis
     this.globe.rotation.y = (clock.seconds / SECONDS_PER_DAY) * Math.PI * 2;
+
+    // Sun direction from Earth's REAL heliocentric position → moving terminator + seasons
+    planetPosition(EARTH_DATA, clock.seconds, this.sunDir).negate().normalize();
+    this.sunLight.position.copy(this.sunDir).multiplyScalar(10);
 
     // moon orbit
     const ma = (clock.seconds / MOON_PERIOD_SEC) * Math.PI * 2;

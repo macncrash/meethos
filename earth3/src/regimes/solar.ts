@@ -30,11 +30,13 @@ import type { WorldBus } from '../world/bus';
 
 interface Body {
   data: PlanetData;
-  mesh: Mesh;
+  holder: Group; // positioned at the planet + tilted by its obliquity
+  mesh: Mesh; // spins about the (tilted) local Y at the true sidereal rate
   readonly pos: Vector3;
 }
 
 const EARTH_DATA = PLANETS.find((p) => p.id === 'earth')!;
+const DEG = Math.PI / 180;
 
 export class SolarRegime implements Regime {
   readonly id = 'solar';
@@ -127,22 +129,28 @@ export class SolarRegime implements Regime {
 
   private buildPlanets(): void {
     for (const data of PLANETS) {
+      // holder sits at the planet's orbit position and carries the axial tilt;
+      // the sphere spins inside it about the (now-tilted) local Y axis.
+      const holder = new Group();
+      holder.rotation.z = data.obliquityDeg * DEG;
+      this.object3d.add(holder);
+
       const mesh = new Mesh(
         new SphereGeometry(data.visualRadius, 32, 32),
         new MeshBasicMaterial({ color: data.color }),
       );
-      this.object3d.add(mesh);
+      holder.add(mesh);
 
       if (data.hasRing) {
         const ring = new Mesh(
           new RingGeometry(data.visualRadius * 1.4, data.visualRadius * 2.3, 64),
           new MeshBasicMaterial({ color: 0xcdb23a, side: DoubleSide, transparent: true, opacity: 0.55 }),
         );
-        ring.rotation.x = Math.PI / 2.3;
+        ring.rotation.x = Math.PI / 2; // lie in the planet's equatorial plane (tilts with the holder)
         mesh.add(ring);
       }
 
-      // faint orbit path
+      // faint orbit path (in the orbital frame, not tilted)
       const path = orbitPath(data);
       const geom = new BufferGeometry().setFromPoints(path);
       const line = new LineLoop(
@@ -158,11 +166,11 @@ export class SolarRegime implements Regime {
         marker.scale.setScalar(0.5);
         marker.visible = false;
         marker.renderOrder = 2;
-        mesh.add(marker);
+        holder.add(marker);
         this.earthMarker = marker;
       }
 
-      const body: Body = { data, mesh, pos: new Vector3() };
+      const body: Body = { data, holder, mesh, pos: new Vector3() };
       this.bodies.push(body);
 
       this.targets.push({
@@ -192,10 +200,12 @@ export class SolarRegime implements Regime {
   step(clock: SimClock): void {
     for (const b of this.bodies) {
       planetPosition(b.data, clock.seconds, b.pos);
-      b.mesh.position.copy(b.pos);
-      b.mesh.rotation.y += 0.01; // gentle spin for life
+      b.holder.position.copy(b.pos);
+      // true sidereal spin about the tilted axis (signed → retrograde for Venus/Uranus)
+      const rotSec = b.data.rotationHours * 3600;
+      b.mesh.rotation.y = (clock.seconds / rotSec) * Math.PI * 2;
     }
-    this.sun.rotation.y += 0.002;
+    this.sun.rotation.y = (clock.seconds / (25.05 * 86400)) * Math.PI * 2; // ~25-day solar rotation
 
     if (this.defenseOn && this.earthMarker) {
       this.markerPhase += clock.realDt;
