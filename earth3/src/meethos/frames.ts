@@ -52,3 +52,19 @@ export function eclipticToGalacticMatrix(): Matrix4 {
   const eclToEq = new Matrix4().makeRotationX(-OBLIQUITY);
   return new Matrix4().multiplyMatrices(EQ_TO_GAL, eclToEq);
 }
+
+/** Galactic Centre (Sgr A*) direction, J2000 equatorial. */
+export const GC_RA_DEG = 266.41683;
+export const GC_DEC_DEG = -29.00781;
+
+/** A basis matrix whose columns are the render-frame directions of the galactic
+ *  axes: +X toward the Galactic Centre, +Z toward the North Galactic Pole. Apply
+ *  it to a galactic-frame position (disk in X–Y, Z = north) to place a star cloud
+ *  correctly — the real ~60° galactic/ecliptic tilt then emerges automatically. */
+export function galacticBasis(): Matrix4 {
+  const toCenter = eclipticDirFromRaDec(GC_RA_DEG, GC_DEC_DEG).normalize();
+  const z = eclipticDirFromRaDec(NGP_RA_DEG, NGP_DEC_DEG).normalize(); // galactic north
+  const y = new Vector3().crossVectors(z, toCenter).normalize();
+  const x = new Vector3().crossVectors(y, z).normalize(); // ≈ toCenter, re-orthogonalized
+  return new Matrix4().makeBasis(x, y, z);
+}

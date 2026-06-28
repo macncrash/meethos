@@ -17,11 +17,15 @@
         border-radius: 12px; backdrop-filter: blur(8px); font-size: 12px; color: var(--ink-dim);
         white-space: nowrap;
       }
+      #scalewrap { position: fixed; left: 20px; bottom: 56px; z-index: 10; color: var(--ink-dim); font-size: 11px; }
+      #scalebar { height: 7px; min-width: 8px; border: 1px solid var(--ink-dim); border-top: none; }
+      #scalebar-label { margin-top: 3px; text-align: center; letter-spacing: 0.03em; }
     </style>
   </head>
   <body>
     <canvas id="stage"></canvas>
-    <div id="title"><b>meethos</b> — true-scale, floating-origin zoom · one physical coordinate system, AU → light-years, no cross-fade</div>
+    <div id="title"><b>meethos</b> — true-scale, floating-origin zoom · one physical coordinate system, planet → galaxy, no cross-fade</div>
+    <div id="scalewrap"><div id="scalebar"></div><div id="scalebar-label">—</div></div>
     <div id="readout">—</div>
     <script type="module" src="/src/zoomMain.ts"></script>
   </body>
