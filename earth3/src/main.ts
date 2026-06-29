@@ -23,9 +23,11 @@ import { DefenseGame } from './world/defenseGame';
 import { Hud } from './ui/hud';
 import { createBackdropStars } from './render/backdrop';
 
-// Migration flag: `?unified` drives the new single floating-origin frame instead
-// of the legacy ScaleManager cross-fade path. Absent → the game is unchanged.
-const UNIFIED = new URLSearchParams(window.location.search).has('unified');
+// The unified single floating-origin frame is now the DEFAULT world. `?legacy`
+// boots the old ScaleManager cross-fade path — kept as an escape hatch until the
+// transition machinery is deleted in a follow-up.
+const LEGACY = new URLSearchParams(window.location.search).has('legacy');
+const UNIFIED = !LEGACY;
 
 const canvas = document.getElementById('stage') as HTMLCanvasElement;
 
@@ -36,9 +38,9 @@ renderer.toneMapping = ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
 
 const scene = new Scene();
-// Under ?unified the galaxy + nearest stars ARE the backdrop; the fixed starfield
-// sphere is a legacy-path-only ambient layer.
-if (!UNIFIED) scene.add(createBackdropStars());
+// In the unified frame the galaxy + nearest stars ARE the backdrop; the fixed
+// starfield sphere is a legacy-path-only ambient layer.
+if (LEGACY) scene.add(createBackdropStars());
 
 const camera = new PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.01, 20000);
 
@@ -48,18 +50,17 @@ controls.dampingFactor = 0.08;
 controls.enablePan = false;
 controls.zoomSpeed = 1.2;
 controls.rotateSpeed = 0.55;
-controls.enabled = !UNIFIED; // the unified frame drives the camera with its own f64 orbit rig
+controls.enabled = LEGACY; // the unified frame drives the camera with its own f64 orbit rig
 
 const simClock = new SimClock();
 const bus = new WorldBus();
-// Under ?unified the legacy regimes render into a throwaway scene (never displayed)
-// so the HUD/DefenseGame wiring still resolves while UnifiedWorld owns the view.
-const manager = new ScaleManager(UNIFIED ? new Scene() : scene, camera, controls, bus);
-// Only built under ?unified — its constructor populates the scene, so on the
-// legacy path it must not exist (else its bodies would pollute the live game).
+// Build ONLY the active world — the legacy ScaleManager populates the scene and
+// subscribes its regimes to the bus, so constructing it when unified would waste
+// geometry and double-handle impacts.
+const manager = LEGACY ? new ScaleManager(scene, camera, controls, bus) : null;
 const unified = UNIFIED ? new UnifiedWorld(scene, camera, renderer, bus, simClock) : null;
 // The UI talks to whichever world is live through the shared WorldFacade seam.
-const world: WorldFacade = unified ?? manager;
+const world: WorldFacade = unified ?? manager!;
 const game = new DefenseGame(world, bus, simClock);
 
 const hud = new Hud(simClock, world, bus, game);
@@ -100,6 +101,7 @@ canvas.addEventListener('dblclick', (e) => {
 });
 
 function pick(e: MouseEvent): FocusTarget | null {
+  if (!manager) return null; // legacy-only path; the unified frame uses unified.pick()
   pointer.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
   raycaster.setFromCamera(pointer, camera);
   let best: FocusTarget | null = null;
@@ -125,8 +127,8 @@ const frameClock = new Clock();
 function animate(): void {
   const realDt = frameClock.getDelta();
   simClock.tick(realDt);
-  if (UNIFIED) unified!.update(simClock, realDt);
-  else manager.update(simClock, realDt);
+  if (unified) unified.update(simClock, realDt);
+  else manager!.update(simClock, realDt);
   game.update(simClock);
   hud.tick();
   renderer.render(scene, camera);
