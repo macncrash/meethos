@@ -35,7 +35,9 @@ renderer.toneMapping = ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
 
 const scene = new Scene();
-scene.add(createBackdropStars());
+// Under ?unified the galaxy + nearest stars ARE the backdrop; the fixed starfield
+// sphere is a legacy-path-only ambient layer.
+if (!UNIFIED) scene.add(createBackdropStars());
 
 const camera = new PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.01, 20000);
 
@@ -45,11 +47,16 @@ controls.dampingFactor = 0.08;
 controls.enablePan = false;
 controls.zoomSpeed = 1.2;
 controls.rotateSpeed = 0.55;
+controls.enabled = !UNIFIED; // the unified frame drives the camera with its own f64 orbit rig
 
 const simClock = new SimClock();
 const bus = new WorldBus();
-const manager = new ScaleManager(scene, camera, controls, bus);
-const unified = new UnifiedWorld(scene, camera, renderer, bus, simClock);
+// Under ?unified the legacy regimes render into a throwaway scene (never displayed)
+// so the HUD/DefenseGame wiring still resolves while UnifiedWorld owns the view.
+const manager = new ScaleManager(UNIFIED ? new Scene() : scene, camera, controls, bus);
+// Only built under ?unified — its constructor populates the scene, so on the
+// legacy path it must not exist (else its bodies would pollute the live game).
+const unified = UNIFIED ? new UnifiedWorld(scene, camera, renderer, bus, simClock) : null;
 const game = new DefenseGame(manager, bus, simClock);
 
 const hud = new Hud(simClock, manager, bus, game);
@@ -113,7 +120,7 @@ const frameClock = new Clock();
 function animate(): void {
   const realDt = frameClock.getDelta();
   simClock.tick(realDt);
-  if (UNIFIED) unified.update(simClock, realDt);
+  if (UNIFIED) unified!.update(simClock, realDt);
   else manager.update(simClock, realDt);
   game.update(simClock);
   hud.tick();
@@ -129,4 +136,4 @@ window.addEventListener('resize', () => {
 });
 
 // expose for debugging in the console
-(window as unknown as { meethos: unknown }).meethos = { manager, unified, simClock, scene, camera, game, hud };
+(window as unknown as { meethos: unknown }).meethos = { manager, unified, simClock, scene, camera, renderer, game, hud };
