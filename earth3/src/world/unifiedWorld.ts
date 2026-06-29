@@ -22,6 +22,7 @@ import {
   BufferGeometry,
   Color,
   Group,
+  Light,
   LineBasicMaterial,
   LineLoop,
   Points,
@@ -46,6 +47,7 @@ import { EarthRegime } from '../regimes/earth';
 import { CometField } from '../regimes/comets';
 import type { DeflectResult, DefenseStats } from '../regimes/comets';
 import { StarSystemRegime } from '../regimes/starSystem';
+import { SurfaceRegime } from '../regimes/surface';
 
 const ORIGIN = new Vector3(0, 0, 0);
 const KPC_AU = AU_PER_PC * 1e3; // AU per kiloparsec
@@ -53,6 +55,13 @@ const EARTH_IDX = PLANETS.findIndex((p) => p.id === 'earth'); // position in PLA
 const EARTH_DATA = PLANETS[EARTH_IDX]!;
 const EARTH_GLOBE_SHOW = 0.03; // AU — within this camera distance, the true-scale globe replaces the dot
 const STAR_SYSTEM_ENTER = 800; // AU — fly this close to a named star and its system materializes
+// the city band: the 72-unit SimCity tile sits in its own LOCAL sub-frame as a patch
+// on the globe's pole (scaled so block geometry stays f32-clean, NOT raw AU vertices).
+const CITY_TILE = 72; // SurfaceRegime's tile width in its local units
+const CITY_LOCAL_SCALE = 0.1 / CITY_TILE; // tile spans ~0.1 of Earth's radius
+const CITY_LAYER = 1; // the city's own lights are scoped here so they can't bleed onto space
+const CITY_SHOW = EARTH_RADIUS_AU * 10; // earthCamDist (AU) within which the city patch is drawn
+const CITY_RADIUS_AU = (CITY_TILE * 0.5) * CITY_LOCAL_SCALE * EARTH_RADIUS_AU; // for the city focus
 
 /** deterministic seed from a star's name (FNV-1a) for procedural systems */
 function seedFromName(name: string): number {
@@ -190,6 +199,12 @@ export class UnifiedWorld {
   private readonly starBodies: { body: Body; name: string }[] = [];
   private activeStarName: string | null = null;
 
+  // the city — Earth's innermost band: a SimCity tile as a patch on the globe's pole,
+  // reused verbatim (terrain, roads, sprawl, comet-razing). Its lights are layer-scoped
+  // and its whole subtree is hidden until you descend, so it can never light space.
+  private readonly surface: SurfaceRegime;
+  private readonly cityFocusTmp = new Vector3();
+
   // f64 orbit camera rig (yaw/pitch/log-distance) around a movable focus point
   private yaw = 0.6;
   private pitch = 0.5;
@@ -252,6 +267,19 @@ export class UnifiedWorld {
     this.starSystem.object3d.visible = false;
     scene.add(this.starSystem.object3d);
 
+    // the city band — a child of the Earth group (so it rides Earth's position/scale),
+    // a small patch on the globe's pole. Scope its lights to CITY_LAYER and put its
+    // meshes on both layers so only the city is lit by them (no bleed onto the globe).
+    this.surface = new SurfaceRegime(bus);
+    this.surface.object3d.traverse((o) => {
+      if (o instanceof Light) o.layers.set(CITY_LAYER); // light ONLY the city
+      else o.layers.enable(CITY_LAYER); // meshes keep layer 0 (camera) + gain layer 1 (lit)
+    });
+    this.surface.object3d.scale.setScalar(CITY_LOCAL_SCALE);
+    this.surface.object3d.position.set(0, 1, 0); // on the globe surface (radius 1 in earth-local)
+    this.surface.object3d.visible = false;
+    this.earth.object3d.add(this.surface.object3d);
+
     // reference rings centred on the Sun, in the ecliptic plane, fading by zoom band
     const RINGS = [
       { r: 30, name: 'Neptune’s orbit' },
@@ -308,6 +336,7 @@ export class UnifiedWorld {
     // the civilization (and Earth's globe/moon/sunlight) advances EVERY frame at any
     // zoom — a living world (owner decision), not just when Earth is in view.
     this.earth.step(this.clock);
+    this.surface.step(this.clock); // the city sprawls every frame too (and rebuilds after strikes)
     // comets fly + home + strike every frame regardless of zoom band (the threat
     // doesn't pause when you look away). Impacts fan out on the bus to the Earth band.
     this.comets.step(this.clock);
@@ -340,6 +369,9 @@ export class UnifiedWorld {
     const earthCamDist = earthWorld.distanceTo(this.fo.camWorld);
     const showGlobe = earthCamDist < EARTH_GLOBE_SHOW;
     this.earth.object3d.visible = showGlobe;
+    // the city band: only drawn when you've descended near the surface (and only then
+    // are its layer-scoped lights live — an invisible subtree contributes no light).
+    this.surface.object3d.visible = showGlobe && earthCamDist < CITY_SHOW;
 
     // reference rings (centred on the Sun = origin), fading by zoom band
     for (const ring of this.rings) {
@@ -468,5 +500,14 @@ export class UnifiedWorld {
   focusStar(name: string): void {
     const sb = this.starBodies.find((x) => x.name === name);
     if (sb) this.focusOn(() => sb.body.world, 0.25); // ~the orrery's star visual radius
+  }
+
+  /** focus the city on the globe's pole (for verification) */
+  focusCity(): void {
+    this.focusOn(() => {
+      this.cityFocusTmp.copy(this.earthBody.world);
+      this.cityFocusTmp.y += EARTH_RADIUS_AU; // the pole patch, one Earth-radius up
+      return this.cityFocusTmp;
+    }, CITY_RADIUS_AU);
   }
 }
