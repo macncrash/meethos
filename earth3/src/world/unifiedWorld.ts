@@ -43,10 +43,13 @@ import { AU_PER_LY, AU_PER_PC, EARTH_RADIUS_AU, SUN_RADIUS_AU } from '../meethos
 import { eclipticDirFromRaDec, galacticBasis } from '../meethos/frames';
 import { FloatingOrigin } from '../meethos/floatingOrigin';
 import { EarthRegime } from '../regimes/earth';
+import { CometField } from '../regimes/comets';
+import type { DeflectResult, DefenseStats } from '../regimes/comets';
 
 const ORIGIN = new Vector3(0, 0, 0);
 const KPC_AU = AU_PER_PC * 1e3; // AU per kiloparsec
 const EARTH_IDX = PLANETS.findIndex((p) => p.id === 'earth'); // position in PLANETS
+const EARTH_DATA = PLANETS[EARTH_IDX]!;
 const EARTH_GLOBE_SHOW = 0.03; // AU — within this camera distance, the true-scale globe replaces the dot
 
 interface Body {
@@ -163,6 +166,12 @@ export class UnifiedWorld {
   private readonly earth: EarthRegime;
   private readonly earthBody: Body;
 
+  // comets — the threat + cross-scale coupling agent, reused verbatim. Already in
+  // absolute AU (Sun at origin), so its group just rides the floating origin; it
+  // homes on Earth's AU position and emits the frozen ImpactEvent on the bus.
+  private readonly cometGroup = new Group();
+  private readonly comets: CometField;
+
   // f64 orbit camera rig (yaw/pitch/log-distance) around a movable focus point
   private yaw = 0.6;
   private pitch = 0.5;
@@ -214,6 +223,11 @@ export class UnifiedWorld {
     this.earth = new EarthRegime(bus);
     this.earth.object3d.scale.setScalar(EARTH_RADIUS_AU);
     scene.add(this.earth.object3d);
+
+    // comets ride a group rebased by -camWorld each frame; they home on Earth's
+    // absolute heliocentric position and emit ImpactEvents the EarthRegime consumes.
+    scene.add(this.cometGroup);
+    this.comets = new CometField(this.cometGroup, bus, (out, seconds) => planetPosition(EARTH_DATA, seconds, out));
 
     // reference rings centred on the Sun, in the ecliptic plane, fading by zoom band
     const RINGS = [
@@ -271,6 +285,9 @@ export class UnifiedWorld {
     // the civilization (and Earth's globe/moon/sunlight) advances EVERY frame at any
     // zoom — a living world (owner decision), not just when Earth is in view.
     this.earth.step(this.clock);
+    // comets fly + home + strike every frame regardless of zoom band (the threat
+    // doesn't pause when you look away). Impacts fan out on the bus to the Earth band.
+    this.comets.step(this.clock);
 
     this.logDist += (this.targetLog - this.logDist) * Math.min(1, realDt * 7); // smooth zoom
     this.logDist = Math.max(this.minLog, Math.min(this.MAX_LOG, this.logDist));
@@ -289,8 +306,9 @@ export class UnifiedWorld {
       this.focusWorld.z + cp * Math.cos(this.yaw) * dist,
     );
 
-    // the galaxy cloud rides floating origin by translating the whole group
+    // the galaxy cloud + comet field ride floating origin by translating their groups
     this.galaxy.group.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
+    this.cometGroup.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
 
     // the Earth band: place the true-scale globe at Earth's heliocentric AU position,
     // shown only when the camera is close enough that the globe is more than a glint.
@@ -347,6 +365,31 @@ export class UnifiedWorld {
     this.focusGet = get;
     this.minLog = Math.log10(Math.max(radius * 2.5, 1e-6));
     if (!get) this.focusWorld.set(0, 0, 0);
+  }
+
+  // ---- comet / defense facade (consumed by the HUD + DefenseGame in step 9) ----
+  launchComet(): void {
+    this.comets.launch();
+  }
+
+  setDefense(on: boolean): void {
+    this.comets.setDefense(on);
+  }
+
+  deflectNearestComet(): DeflectResult {
+    return this.comets.deflectNearest();
+  }
+
+  threatDistance(): number | null {
+    return this.comets.nearestThreatDist();
+  }
+
+  cometCount(): number {
+    return this.comets.count;
+  }
+
+  defenseStats(): DefenseStats {
+    return this.comets.defenseStats;
   }
 
   // ---- debug / verification hooks (mirrors zoomDemo) ----
