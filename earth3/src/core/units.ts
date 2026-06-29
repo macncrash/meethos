@@ -8,9 +8,9 @@
 export const SECONDS_PER_DAY = 86_400;
 export const SECONDS_PER_YEAR = 365.25 * SECONDS_PER_DAY;
 
-// Reference physical scales (metres) — documentation / future true-floating-origin work.
-export const AU_METERS = 1.495_978_707e11;
-export const LIGHT_YEAR_METERS = 9.460_730_472e15;
+// Physical distance constants (AU_M, LY_M, …) live in the meethos-core nucleus
+// (src/meethos/units.ts) — the single source of truth for the floating-origin frame.
+// core/units.ts keeps only the frame-agnostic time/rate ladder.
 
 /**
  * Time-rate ladder: simulated seconds advanced per real second. Spans hours/sec

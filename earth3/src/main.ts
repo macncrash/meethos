@@ -17,9 +17,14 @@ import { SimClock } from './core/clock';
 import type { FocusTarget } from './core/regime';
 import { ScaleManager } from './world/scaleManager';
 import { WorldBus } from './world/bus';
+import { UnifiedWorld } from './world/unifiedWorld';
 import { DefenseGame } from './world/defenseGame';
 import { Hud } from './ui/hud';
 import { createBackdropStars } from './render/backdrop';
+
+// Migration flag: `?unified` drives the new single floating-origin frame instead
+// of the legacy ScaleManager cross-fade path. Absent → the game is unchanged.
+const UNIFIED = new URLSearchParams(window.location.search).has('unified');
 
 const canvas = document.getElementById('stage') as HTMLCanvasElement;
 
@@ -44,6 +49,7 @@ controls.rotateSpeed = 0.55;
 const simClock = new SimClock();
 const bus = new WorldBus();
 const manager = new ScaleManager(scene, camera, controls, bus);
+const unified = new UnifiedWorld(scene, camera, renderer, bus, simClock);
 const game = new DefenseGame(manager, bus, simClock);
 
 const hud = new Hud(simClock, manager, bus, game);
@@ -107,7 +113,8 @@ const frameClock = new Clock();
 function animate(): void {
   const realDt = frameClock.getDelta();
   simClock.tick(realDt);
-  manager.update(simClock, realDt);
+  if (UNIFIED) unified.update(simClock, realDt);
+  else manager.update(simClock, realDt);
   game.update(simClock);
   hud.tick();
   renderer.render(scene, camera);
@@ -122,4 +129,4 @@ window.addEventListener('resize', () => {
 });
 
 // expose for debugging in the console
-(window as unknown as { meethos: unknown }).meethos = { manager, simClock, scene, camera, game, hud };
+(window as unknown as { meethos: unknown }).meethos = { manager, unified, simClock, scene, camera, game, hud };
