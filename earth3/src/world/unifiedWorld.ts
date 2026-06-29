@@ -254,7 +254,9 @@ export class UnifiedWorld implements WorldFacade {
   // screen-space label declutter: each label sprite with a static priority; every
   // frame the visible ones are projected and lower-priority labels that collide with
   // a higher-priority one are hidden (re-evaluated each frame, so it never sticks).
-  private readonly labelEntries: { sprite: Sprite; priority: number }[] = [];
+  // `world` entries store an absolute-AU position (cosmic-web labels nested in a group
+  // that rides −camWorld) and must be rebased with fo.rel() before projecting.
+  private readonly labelEntries: { sprite: Sprite; priority: number; world?: boolean }[] = [];
   private readonly projTmp = new Vector3();
 
   // ---- WorldFacade state (the band/inspector/picking surface the HUD talks to) ----
@@ -387,6 +389,8 @@ export class UnifiedWorld implements WorldFacade {
       this.labelEntries.push({ sprite: b.label, priority });
     });
     for (const r of this.rings) this.labelEntries.push({ sprite: r.label, priority: 25 });
+    // cosmic-web Local Group labels (Andromeda first); only live at the Cosmos band
+    this.cosmicWeb.localGroupLabels().forEach((label, i) => this.labelEntries.push({ sprite: label, priority: 46 - i * 2, world: true }));
     this.labelEntries.sort((a, b) => b.priority - a.priority);
   }
 
@@ -395,12 +399,19 @@ export class UnifiedWorld implements WorldFacade {
     this.camera.updateMatrixWorld();
     const w = window.innerWidth;
     const h = window.innerHeight;
+    const cosmosVisible = this.cosmicWeb.group.visible;
     const keptX: number[] = [];
     const keptY: number[] = [];
     for (const e of this.labelEntries) {
       const s = e.sprite;
-      if (!s.visible) continue;
-      this.projTmp.copy(s.position).project(this.camera);
+      if (e.world) {
+        if (!cosmosVisible) continue; // cosmic-web labels only matter at the Cosmos band
+        this.fo.rel(s.position, this.projTmp); // absolute AU → camera-relative
+      } else {
+        if (!s.visible) continue;
+        this.projTmp.copy(s.position);
+      }
+      this.projTmp.project(this.camera);
       if (this.projTmp.z > 1) { s.visible = false; continue; } // behind the camera
       const sx = (this.projTmp.x * 0.5 + 0.5) * w;
       const sy = (1 - (this.projTmp.y * 0.5 + 0.5)) * h;

@@ -274,6 +274,14 @@ export class CosmicWeb {
     for (const lg of this.localGroup) {
       lg.sprite.position.copy(this.homePos).add(lg.offset);
       lg.label.position.set(lg.sprite.position.x, lg.sprite.position.y + SPRITE * lg.size * 0.6, lg.sprite.position.z);
+      lg.label.visible = true; // reset each frame; the caller's declutter pass hides overlaps
     }
+  }
+
+  /** the Local Group text labels (Andromeda etc.), highest-priority first. Their
+   *  `.position` is the absolute world-AU position (the group rides −camWorld), so
+   *  the caller must rebase with fo.rel() before projecting. */
+  localGroupLabels(): Sprite[] {
+    return this.localGroup.map((lg) => lg.label);
   }
 }
