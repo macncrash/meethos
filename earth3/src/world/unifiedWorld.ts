@@ -52,6 +52,7 @@ import { CometField } from '../regimes/comets';
 import type { DeflectResult, DefenseStats } from '../regimes/comets';
 import { StarSystemRegime } from '../regimes/starSystem';
 import { SurfaceRegime } from '../regimes/surface';
+import { CosmicWeb } from './cosmicWeb';
 
 const ORIGIN = new Vector3(0, 0, 0);
 const KPC_AU = AU_PER_PC * 1e3; // AU per kiloparsec
@@ -59,6 +60,7 @@ const EARTH_IDX = PLANETS.findIndex((p) => p.id === 'earth'); // position in PLA
 const EARTH_DATA = PLANETS[EARTH_IDX]!;
 const EARTH_GLOBE_SHOW = 0.03; // AU — within this camera distance, the true-scale globe replaces the dot
 const STAR_SYSTEM_ENTER = 800; // AU — fly this close to a named star and its system materializes
+const COSMIC_WEB_SHOW = 2e10; // AU — beyond this zoom-out the galaxy is one node in the cosmic web
 // the city band: the 72-unit SimCity tile sits in its own LOCAL sub-frame as a patch
 // on the globe's pole (scaled so block geometry stays f32-clean, NOT raw AU vertices).
 const CITY_TILE = 72; // SurfaceRegime's tile width in its local units
@@ -232,13 +234,17 @@ export class UnifiedWorld implements WorldFacade {
   private readonly surface: SurfaceRegime;
   private readonly cityFocusTmp = new Vector3();
 
+  // the Cosmos band — the cosmic web of galaxies with the Milky Way at the origin.
+  // Rides the floating origin like the galaxy; shown only when zoomed out past it.
+  private readonly cosmicWeb = new CosmicWeb();
+
   // f64 orbit camera rig (yaw/pitch/log-distance) around a movable focus point
   private yaw = 0.6;
   private pitch = 0.5;
   private logDist = Math.log10(3); // start a few AU out (inner solar system)
   private targetLog = this.logDist;
   private minLog = Math.log10(SUN_RADIUS_AU * 2.5); // closest approach — set per focus body
-  private readonly MAX_LOG = Math.log10(7e9); // out past the galactic disk (~34 kpc)
+  private readonly MAX_LOG = Math.log10(5e12); // out to the cosmic web (~30 Mpc framing)
 
   // camera focus: orbit + look at this world point (default the Sun at the origin);
   // focusGet, when set, re-reads a moving body's position every frame.
@@ -304,6 +310,10 @@ export class UnifiedWorld implements WorldFacade {
     // one pooled star-system orrery, materialized on approach (see update())
     this.starSystem.object3d.visible = false;
     scene.add(this.starSystem.object3d);
+
+    // the cosmic web — shown only at the Cosmos band, rides the floating origin
+    this.cosmicWeb.group.visible = false;
+    scene.add(this.cosmicWeb.group);
 
     // the city band — a child of the Earth group (so it rides Earth's position/scale),
     // a small patch on the globe's pole. Scope its lights to CITY_LAYER and put its
@@ -401,6 +411,13 @@ export class UnifiedWorld implements WorldFacade {
     // the galaxy cloud + comet field ride floating origin by translating their groups
     this.galaxy.group.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
     this.cometGroup.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
+
+    // the cosmic web: Big-Bang formation runs whenever active; shown + rebased only
+    // at the Cosmos band (zoomed out past the galaxy).
+    this.cosmicWeb.step(realDt);
+    const showCosmos = dist > COSMIC_WEB_SHOW;
+    this.cosmicWeb.group.visible = showCosmos;
+    if (showCosmos) this.cosmicWeb.group.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
 
     // the Earth band: place the true-scale globe at Earth's heliocentric AU position,
     // shown only when the camera is close enough that the globe is more than a glint.
@@ -580,7 +597,7 @@ export class UnifiedWorld implements WorldFacade {
     if (earthCamDist < EARTH_GLOBE_SHOW) return 'earth';
     const d = 10 ** this.logDist;
     if (d < 300) return 'solar';
-    if (d < 5e8) return 'galaxy';
+    if (d < COSMIC_WEB_SHOW) return 'galaxy';
     return 'universe';
   }
 
@@ -640,6 +657,7 @@ export class UnifiedWorld implements WorldFacade {
 
   /** every selectable body currently in play (adds the active star-system's planets) */
   pickTargets(): FocusTarget[] {
+    if (this.currentBandId() === 'universe') return this.cosmicWeb.targets(); // galaxies, not planets
     if (!this.activeStarName) return this.pickables;
     const star = this.starBodies.find((s) => s.name === this.activeStarName);
     if (!star) return this.pickables;
@@ -673,13 +691,13 @@ export class UnifiedWorld implements WorldFacade {
   }
 
   cosmicInfo(): CosmicInfo {
-    return { atCosmos: this.currentBandId() === 'universe', forming: false, ageGyr: 13.8 };
+    return { atCosmos: this.currentBandId() === 'universe', forming: this.cosmicWeb.isForming, ageGyr: this.cosmicWeb.cosmicAgeGyr };
   }
 
-  /** Big-Bang structure formation isn't ported to the unified frame yet (the cosmic
-   *  web is a deferred outer shell); a no-op keeps the HUD button harmless. */
+  /** rewind to the Big Bang and replay structure formation on the cosmic web */
   bigBang(): void {
-    /* deferred — see the migration notes */
+    this.goTo('universe'); // make sure the cosmic web is framed
+    this.cosmicWeb.playBigBang();
   }
 
   // ---- debug / verification hooks (mirrors zoomDemo) ----
