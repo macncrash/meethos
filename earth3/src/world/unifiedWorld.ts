@@ -251,6 +251,12 @@ export class UnifiedWorld implements WorldFacade {
   private readonly focusWorld = new Vector3();
   private focusGet: (() => Vector3) | null = null;
 
+  // screen-space label declutter: each label sprite with a static priority; every
+  // frame the visible ones are projected and lower-priority labels that collide with
+  // a higher-priority one are hidden (re-evaluated each frame, so it never sticks).
+  private readonly labelEntries: { sprite: Sprite; priority: number }[] = [];
+  private readonly projTmp = new Vector3();
+
   // ---- WorldFacade state (the band/inspector/picking surface the HUD talks to) ----
   /** all selectable major bodies (Sun, planets, stars, GC), positions in absolute AU */
   private readonly pickables: FocusTarget[] = [];
@@ -365,6 +371,46 @@ export class UnifiedWorld implements WorldFacade {
     }, { passive: false });
 
     this.buildPickables();
+    this.buildLabelEntries();
+  }
+
+  /** assign each label a static declutter priority (Sun > Earth > inner planets >
+   *  outer planets > stars > galactic centre > rings), highest first. */
+  private buildLabelEntries(): void {
+    this.bodies.forEach((b, i) => {
+      let priority: number;
+      if (b.kind === 'sun') priority = 100;
+      else if (b === this.earthBody) priority = 90;
+      else if (b.kind === 'planet') priority = 60 - i; // inner planets (lower index) win
+      else if (b === this.gcBody) priority = 35;
+      else priority = 40; // nearest stars
+      this.labelEntries.push({ sprite: b.label, priority });
+    });
+    for (const r of this.rings) this.labelEntries.push({ sprite: r.label, priority: 25 });
+    this.labelEntries.sort((a, b) => b.priority - a.priority);
+  }
+
+  /** hide labels that collide in screen space with an already-kept higher-priority one */
+  private declutterLabels(): void {
+    this.camera.updateMatrixWorld();
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const keptX: number[] = [];
+    const keptY: number[] = [];
+    for (const e of this.labelEntries) {
+      const s = e.sprite;
+      if (!s.visible) continue;
+      this.projTmp.copy(s.position).project(this.camera);
+      if (this.projTmp.z > 1) { s.visible = false; continue; } // behind the camera
+      const sx = (this.projTmp.x * 0.5 + 0.5) * w;
+      const sy = (1 - (this.projTmp.y * 0.5 + 0.5)) * h;
+      let overlap = false;
+      for (let k = 0; k < keptX.length; k++) {
+        if (Math.abs(keptX[k]! - sx) < 78 && Math.abs(keptY[k]! - sy) < 15) { overlap = true; break; }
+      }
+      if (overlap) s.visible = false;
+      else { keptX.push(sx); keptY.push(sy); }
+    }
   }
 
   private dot(size: number, color: Color): Sprite {
@@ -499,6 +545,8 @@ export class UnifiedWorld implements WorldFacade {
     this.camera.near = Math.max(dist * 1e-4, 1e-6);
     this.camera.far = Math.max(dist * 1e3, 1.5e10);
     this.camera.updateProjectionMatrix();
+
+    this.declutterLabels(); // hide overlapping labels now the camera is final
   }
 
   /** Orbit + look at a moving world point (e.g. a planet). `radius` sets how close
