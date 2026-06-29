@@ -39,12 +39,15 @@ import { dotTexture, glowTexture } from '../render/sprites';
 import { makeLabel } from '../render/label';
 import { planetPosition } from '../regimes/data/kepler';
 import { PLANETS, SUN } from '../regimes/data/planets';
-import { AU_PER_LY, AU_PER_PC, SUN_RADIUS_AU } from '../meethos/units';
+import { AU_PER_LY, AU_PER_PC, EARTH_RADIUS_AU, SUN_RADIUS_AU } from '../meethos/units';
 import { eclipticDirFromRaDec, galacticBasis } from '../meethos/frames';
 import { FloatingOrigin } from '../meethos/floatingOrigin';
+import { EarthRegime } from '../regimes/earth';
 
 const ORIGIN = new Vector3(0, 0, 0);
 const KPC_AU = AU_PER_PC * 1e3; // AU per kiloparsec
+const EARTH_IDX = PLANETS.findIndex((p) => p.id === 'earth'); // position in PLANETS
+const EARTH_GLOBE_SHOW = 0.03; // AU — within this camera distance, the true-scale globe replaces the dot
 
 interface Body {
   world: Vector3; // absolute position in AU (f64)
@@ -155,13 +158,23 @@ export class UnifiedWorld {
   private readonly gcBody: Body;
   private readonly rings: { line: LineLoop; label: Sprite; r: number }[];
 
-  // f64 orbit camera rig (yaw/pitch/log-distance)
+  // the Earth band: the full lit globe + Moon + living civilization, reused verbatim
+  // from the legacy regime, scaled to true Earth radius and ridden on the AU frame.
+  private readonly earth: EarthRegime;
+  private readonly earthBody: Body;
+
+  // f64 orbit camera rig (yaw/pitch/log-distance) around a movable focus point
   private yaw = 0.6;
   private pitch = 0.5;
   private logDist = Math.log10(3); // start a few AU out (inner solar system)
   private targetLog = this.logDist;
-  private readonly MIN_LOG = Math.log10(SUN_RADIUS_AU * 3); // dive to the Sun's surface
+  private minLog = Math.log10(SUN_RADIUS_AU * 2.5); // closest approach — set per focus body
   private readonly MAX_LOG = Math.log10(7e9); // out past the galactic disk (~34 kpc)
+
+  // camera focus: orbit + look at this world point (default the Sun at the origin);
+  // focusGet, when set, re-reads a moving body's position every frame.
+  private readonly focusWorld = new Vector3();
+  private focusGet: (() => Vector3) | null = null;
 
   // drag state
   private dragging = false;
@@ -173,7 +186,7 @@ export class UnifiedWorld {
     private readonly scene: Scene,
     private readonly camera: PerspectiveCamera,
     renderer: WebGLRenderer,
-    _bus: WorldBus,
+    bus: WorldBus,
     private readonly clock: SimClock,
   ) {
     // ---- build the scene content in the single AU frame ----
@@ -192,6 +205,15 @@ export class UnifiedWorld {
     // the Galactic Centre marker (rides the cloud's bulge)
     this.addBody(this.galaxy.centerWorld, 'Galactic Centre', new Color(0xffe6b0), 'star', 0.02);
     this.gcBody = this.bodies[this.bodies.length - 1]!;
+
+    // the Earth band: reuse the full EarthRegime (lit globe + Moon + civilization +
+    // impact coupling) verbatim, scaled so its 1-unit globe is Earth's true radius
+    // and placed at Earth's heliocentric AU position each frame. Its civilization
+    // advances every frame (owner decision: a living world) — see update().
+    this.earthBody = this.bodies[EARTH_IDX + 1]!; // bodies[0] is the Sun
+    this.earth = new EarthRegime(bus);
+    this.earth.object3d.scale.setScalar(EARTH_RADIUS_AU);
+    scene.add(this.earth.object3d);
 
     // reference rings centred on the Sun, in the ecliptic plane, fading by zoom band
     const RINGS = [
@@ -226,7 +248,7 @@ export class UnifiedWorld {
     });
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
-      this.targetLog = Math.max(this.MIN_LOG, Math.min(this.MAX_LOG, this.targetLog + Math.sign(e.deltaY) * 0.18));
+      this.targetLog = Math.max(this.minLog, Math.min(this.MAX_LOG, this.targetLog + Math.sign(e.deltaY) * 0.18));
     }, { passive: false });
   }
 
@@ -244,20 +266,39 @@ export class UnifiedWorld {
     this.bodies.push({ world, dot: this.dot(dotSize, color), label, kind });
   }
 
-  /** Drive one frame of the unified world: animate, rebase to the camera, declutter. */
+  /** Drive one frame of the unified world: simulate, rebase to the camera, declutter. */
   update(_clock: SimClock, realDt: number): void {
+    // the civilization (and Earth's globe/moon/sunlight) advances EVERY frame at any
+    // zoom — a living world (owner decision), not just when Earth is in view.
+    this.earth.step(this.clock);
+
     this.logDist += (this.targetLog - this.logDist) * Math.min(1, realDt * 7); // smooth zoom
+    this.logDist = Math.max(this.minLog, Math.min(this.MAX_LOG, this.logDist));
 
     // re-place the planets along their true orbits at the sim clock's absolute time
     const seconds = this.clock.seconds;
     for (let i = 0; i < PLANETS.length; i++) planetPosition(PLANETS[i]!, seconds, this.bodies[i + 1]!.world);
 
+    // the camera orbits + looks at the focus point (default the Sun at the origin)
+    if (this.focusGet) this.focusWorld.copy(this.focusGet());
     const dist = 10 ** this.logDist;
     const cp = Math.cos(this.pitch);
-    this.fo.camWorld.set(cp * Math.sin(this.yaw) * dist, Math.sin(this.pitch) * dist, cp * Math.cos(this.yaw) * dist);
+    this.fo.camWorld.set(
+      this.focusWorld.x + cp * Math.sin(this.yaw) * dist,
+      this.focusWorld.y + Math.sin(this.pitch) * dist,
+      this.focusWorld.z + cp * Math.cos(this.yaw) * dist,
+    );
 
     // the galaxy cloud rides floating origin by translating the whole group
     this.galaxy.group.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
+
+    // the Earth band: place the true-scale globe at Earth's heliocentric AU position,
+    // shown only when the camera is close enough that the globe is more than a glint.
+    const earthWorld = this.earthBody.world;
+    this.fo.place(this.earth.object3d, earthWorld);
+    const earthCamDist = earthWorld.distanceTo(this.fo.camWorld);
+    const showGlobe = earthCamDist < EARTH_GLOBE_SHOW;
+    this.earth.object3d.visible = showGlobe;
 
     // reference rings (centred on the Sun = origin), fading by zoom band
     for (const ring of this.rings) {
@@ -287,12 +328,25 @@ export class UnifiedWorld {
         b.label.visible = dist > 3000 && dist < 8e7;
       }
     }
+    // when the globe is shown, the glow-floor dot would punch through it (depthTest off)
+    if (showGlobe) {
+      this.earthBody.dot.visible = false;
+      this.earthBody.label.visible = false;
+    }
 
     this.camera.position.set(0, 0, 0);
-    this.camera.lookAt(this.fo.rel(ORIGIN, this.tmp));
+    this.camera.lookAt(this.fo.rel(this.focusWorld, this.tmp));
     this.camera.near = Math.max(dist * 1e-4, 1e-6);
     this.camera.far = Math.max(dist * 1e3, 1.5e10);
     this.camera.updateProjectionMatrix();
+  }
+
+  /** Orbit + look at a moving world point (e.g. a planet). `radius` sets how close
+   *  the camera may approach. Pass null to return to the Sun at the origin. */
+  focusOn(get: (() => Vector3) | null, radius: number): void {
+    this.focusGet = get;
+    this.minLog = Math.log10(Math.max(radius * 2.5, 1e-6));
+    if (!get) this.focusWorld.set(0, 0, 0);
   }
 
   // ---- debug / verification hooks (mirrors zoomDemo) ----
@@ -303,11 +357,21 @@ export class UnifiedWorld {
 
   /** jump the camera to a log-distance (and its zoom target) — for headless tests */
   setLogDist(v: number): void {
-    this.logDist = this.targetLog = Math.max(this.MIN_LOG, Math.min(this.MAX_LOG, v));
+    this.logDist = this.targetLog = Math.max(this.minLog, Math.min(this.MAX_LOG, v));
   }
 
   setView(yaw: number, pitch: number): void {
     this.yaw = yaw;
     this.pitch = pitch;
+  }
+
+  /** focus the camera on Earth (for verification) */
+  focusEarth(): void {
+    this.focusOn(() => this.earthBody.world, EARTH_RADIUS_AU);
+  }
+
+  /** focus back on the Sun */
+  focusSun(): void {
+    this.focusOn(null, SUN_RADIUS_AU);
   }
 }
