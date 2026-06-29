@@ -45,12 +45,24 @@ import { FloatingOrigin } from '../meethos/floatingOrigin';
 import { EarthRegime } from '../regimes/earth';
 import { CometField } from '../regimes/comets';
 import type { DeflectResult, DefenseStats } from '../regimes/comets';
+import { StarSystemRegime } from '../regimes/starSystem';
 
 const ORIGIN = new Vector3(0, 0, 0);
 const KPC_AU = AU_PER_PC * 1e3; // AU per kiloparsec
 const EARTH_IDX = PLANETS.findIndex((p) => p.id === 'earth'); // position in PLANETS
 const EARTH_DATA = PLANETS[EARTH_IDX]!;
 const EARTH_GLOBE_SHOW = 0.03; // AU — within this camera distance, the true-scale globe replaces the dot
+const STAR_SYSTEM_ENTER = 800; // AU — fly this close to a named star and its system materializes
+
+/** deterministic seed from a star's name (FNV-1a) for procedural systems */
+function seedFromName(name: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < name.length; i++) {
+    h ^= name.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
 
 interface Body {
   world: Vector3; // absolute position in AU (f64)
@@ -172,6 +184,12 @@ export class UnifiedWorld {
   private readonly cometGroup = new Group();
   private readonly comets: CometField;
 
+  // procedural / real planetary systems around the named stars — one pooled instance,
+  // reconfigured for whichever star you've flown closest to (lazy materialization).
+  private readonly starSystem = new StarSystemRegime();
+  private readonly starBodies: { body: Body; name: string }[] = [];
+  private activeStarName: string | null = null;
+
   // f64 orbit camera rig (yaw/pitch/log-distance) around a movable focus point
   private yaw = 0.6;
   private pitch = 0.5;
@@ -210,6 +228,7 @@ export class UnifiedWorld {
     for (const s of STARS) {
       const world = eclipticDirFromRaDec(s.ra, s.dec).multiplyScalar(s.ly * AU_PER_LY);
       this.addBody(world, s.name, blackbodyColor(s.k, c).clone(), 'star', s.k > 7000 ? 0.016 : 0.011);
+      this.starBodies.push({ body: this.bodies[this.bodies.length - 1]!, name: s.name });
     }
     // the Galactic Centre marker (rides the cloud's bulge)
     this.addBody(this.galaxy.centerWorld, 'Galactic Centre', new Color(0xffe6b0), 'star', 0.02);
@@ -228,6 +247,10 @@ export class UnifiedWorld {
     // absolute heliocentric position and emit ImpactEvents the EarthRegime consumes.
     scene.add(this.cometGroup);
     this.comets = new CometField(this.cometGroup, bus, (out, seconds) => planetPosition(EARTH_DATA, seconds, out));
+
+    // one pooled star-system orrery, materialized on approach (see update())
+    this.starSystem.object3d.visible = false;
+    scene.add(this.starSystem.object3d);
 
     // reference rings centred on the Sun, in the ecliptic plane, fading by zoom band
     const RINGS = [
@@ -352,6 +375,29 @@ export class UnifiedWorld {
       this.earthBody.label.visible = false;
     }
 
+    // star systems: materialize the orrery of whichever named star you've flown closest
+    // to, reconfiguring (real exoplanets by host name, else procedural by seed) on change.
+    let nearStar: { body: Body; name: string } | null = null;
+    let nearStarD = Infinity;
+    for (const sb of this.starBodies) {
+      const d = sb.body.world.distanceTo(this.fo.camWorld);
+      if (d < nearStarD) { nearStarD = d; nearStar = sb; }
+    }
+    if (nearStar && nearStarD < STAR_SYSTEM_ENTER) {
+      if (nearStar.name !== this.activeStarName) {
+        this.activeStarName = nearStar.name;
+        this.starSystem.configure(seedFromName(nearStar.name), nearStar.name);
+      }
+      this.starSystem.step(this.clock);
+      this.fo.place(this.starSystem.object3d, nearStar.body.world);
+      this.starSystem.object3d.visible = true;
+      nearStar.body.dot.visible = false; // the orrery's star sphere replaces the dot
+      nearStar.body.label.visible = false;
+    } else if (this.activeStarName !== null) {
+      this.starSystem.object3d.visible = false;
+      this.activeStarName = null;
+    }
+
     this.camera.position.set(0, 0, 0);
     this.camera.lookAt(this.fo.rel(this.focusWorld, this.tmp));
     this.camera.near = Math.max(dist * 1e-4, 1e-6);
@@ -416,5 +462,11 @@ export class UnifiedWorld {
   /** focus back on the Sun */
   focusSun(): void {
     this.focusOn(null, SUN_RADIUS_AU);
+  }
+
+  /** focus a named nearest star (for verification) */
+  focusStar(name: string): void {
+    const sb = this.starBodies.find((x) => x.name === name);
+    if (sb) this.focusOn(() => sb.body.world, 0.25); // ~the orrery's star visual radius
   }
 }
