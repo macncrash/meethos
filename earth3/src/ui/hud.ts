@@ -5,7 +5,7 @@
 import type { SimClock } from '../core/clock';
 import { formatStardate } from '../core/units';
 import type { Ray } from 'three';
-import type { ScaleManager } from '../world/scaleManager';
+import type { WorldFacade } from '../world/facade';
 import type { WorldBus } from '../world/bus';
 import type { DefenseGame } from '../world/defenseGame';
 
@@ -31,7 +31,7 @@ export class Hud {
 
   constructor(
     private readonly clock: SimClock,
-    private readonly manager: ScaleManager,
+    private readonly manager: WorldFacade,
     bus: WorldBus,
     private readonly game: DefenseGame,
   ) {

@@ -27,20 +27,24 @@ import {
   LineLoop,
   Points,
   PointsMaterial,
+  Sphere,
   Sprite,
   SpriteMaterial,
   Vector3,
 } from 'three';
-import type { PerspectiveCamera, Scene, WebGLRenderer } from 'three';
+import type { PerspectiveCamera, Ray, Scene, WebGLRenderer } from 'three';
 import type { SimClock } from '../core/clock';
+import type { FocusTarget, InspectorInfo } from '../core/regime';
+import type { PlanetData } from '../regimes/data/planets';
 import type { WorldBus } from './bus';
+import type { Breadcrumb, CosmicInfo, WorldFacade } from './facade';
 import { blackbodyColor } from '../core/color';
 import { mulberry32, gaussian } from '../core/rng';
 import { dotTexture, glowTexture } from '../render/sprites';
 import { makeLabel } from '../render/label';
 import { planetPosition } from '../regimes/data/kepler';
 import { PLANETS, SUN } from '../regimes/data/planets';
-import { AU_PER_LY, AU_PER_PC, EARTH_RADIUS_AU, SUN_RADIUS_AU } from '../meethos/units';
+import { AU_M, AU_PER_LY, AU_PER_PC, EARTH_RADIUS_AU, SUN_RADIUS_AU } from '../meethos/units';
 import { eclipticDirFromRaDec, galacticBasis } from '../meethos/frames';
 import { FloatingOrigin } from '../meethos/floatingOrigin';
 import { EarthRegime } from '../regimes/earth';
@@ -71,6 +75,29 @@ function seedFromName(name: string): number {
     h = Math.imul(h, 16777619);
   }
   return h >>> 0;
+}
+
+/** inspector rows for a solar-system planet */
+function planetInfo(p: PlanetData): InspectorInfo {
+  return {
+    title: p.label,
+    rows: [
+      ['Orbit', `${p.a.toFixed(2)} AU`],
+      ['Year', p.periodYears < 1 ? `${(p.periodYears * 365).toFixed(0)} d` : `${p.periodYears.toFixed(1)} yr`],
+      ['Radius', `${p.radiusKm.toLocaleString()} km`],
+    ],
+    blurb: p.blurb,
+  };
+}
+
+/** inspector rows for a nearest star */
+function starInfo(name: string, ly: number, k: number): InspectorInfo {
+  const cls = k > 9000 ? 'A' : k > 6800 ? 'F' : k > 5300 ? 'G' : k > 3900 ? 'K' : 'M';
+  return {
+    title: name,
+    rows: [['Distance', `${ly.toFixed(2)} ly`], ['Class', `${cls}-type · ${k.toLocaleString()} K`]],
+    blurb: 'A real star in the solar neighbourhood — fly in to see its planets.',
+  };
 }
 
 interface Body {
@@ -172,7 +199,7 @@ const STARS = [
   { name: 'Pollux', ra: 116.33, dec: 28.03, ly: 33.78, k: 4865 },
 ];
 
-export class UnifiedWorld {
+export class UnifiedWorld implements WorldFacade {
   /** Camera-at-origin world rebasing — every body's f64 world position is placed
    *  relative to camWorld so only camera-relative f32 reaches the GPU. */
   readonly fo = new FloatingOrigin(new Vector3());
@@ -217,6 +244,17 @@ export class UnifiedWorld {
   // focusGet, when set, re-reads a moving body's position every frame.
   private readonly focusWorld = new Vector3();
   private focusGet: (() => Vector3) | null = null;
+
+  // ---- WorldFacade state (the band/inspector/picking surface the HUD talks to) ----
+  /** all selectable major bodies (Sun, planets, stars, GC), positions in absolute AU */
+  private readonly pickables: FocusTarget[] = [];
+  private focusTarget!: FocusTarget; // the currently focused body (set in the constructor)
+  private lastBandId = '';
+  onChange?: () => void;
+  private readonly focusGetTmp = new Vector3();
+  private readonly pickWorld = new Vector3();
+  private readonly pickHit = new Vector3();
+  private readonly pickSphere = new Sphere();
 
   // drag state
   private dragging = false;
@@ -315,6 +353,8 @@ export class UnifiedWorld {
       e.preventDefault();
       this.targetLog = Math.max(this.minLog, Math.min(this.MAX_LOG, this.targetLog + Math.sign(e.deltaY) * 0.18));
     }, { passive: false });
+
+    this.buildPickables();
   }
 
   private dot(size: number, color: Color): Sprite {
@@ -430,6 +470,13 @@ export class UnifiedWorld {
       this.activeStarName = null;
     }
 
+    // notify the HUD when the band changes so it rebuilds the breadcrumb/era
+    const band = this.currentBandId();
+    if (band !== this.lastBandId) {
+      this.lastBandId = band;
+      this.onChange?.();
+    }
+
     this.camera.position.set(0, 0, 0);
     this.camera.lookAt(this.fo.rel(this.focusWorld, this.tmp));
     this.camera.near = Math.max(dist * 1e-4, 1e-6);
@@ -439,23 +486,37 @@ export class UnifiedWorld {
 
   /** Orbit + look at a moving world point (e.g. a planet). `radius` sets how close
    *  the camera may approach. Pass null to return to the Sun at the origin. */
-  focusOn(get: (() => Vector3) | null, radius: number): void {
+  private setCameraFocus(get: (() => Vector3) | null, radius: number): void {
     this.focusGet = get;
     this.minLog = Math.log10(Math.max(radius * 2.5, 1e-6));
     if (!get) this.focusWorld.set(0, 0, 0);
   }
 
-  // ---- comet / defense facade (consumed by the HUD + DefenseGame in step 9) ----
+  // ---- comet / defense facade (WorldFacade — consumed by the HUD + DefenseGame) ----
   launchComet(): void {
     this.comets.launch();
   }
 
-  setDefense(on: boolean): void {
+  setDefenseMode(on: boolean): void {
     this.comets.setDefense(on);
   }
 
-  deflectNearestComet(): DeflectResult {
+  /** frame the solar system where the comets are (a zoom, not a regime transition) */
+  frameForDefense(): void {
+    this.focusSun();
+    this.targetLog = Math.log10(6); // ~6 AU — Earth's orbit + inbound comets in view
+  }
+
+  deflectComet(): DeflectResult {
     return this.comets.deflectNearest();
+  }
+
+  /** deflect the comet under a click ray. The ray is camera-relative (camera at the
+   *  origin); shift it into absolute AU space where the comets live. */
+  deflectCometAt(ray: Ray): DeflectResult {
+    const r = ray.clone();
+    r.origin.add(this.fo.camWorld);
+    return this.comets.deflectAtRay(r);
   }
 
   threatDistance(): number | null {
@@ -468,6 +529,157 @@ export class UnifiedWorld {
 
   defenseStats(): DefenseStats {
     return this.comets.defenseStats;
+  }
+
+  // ---- WorldFacade: bands, focus inspector, navigation, picking ----
+
+  /** Build the selectable major bodies (Sun, planets, stars, GC) as FocusTargets with
+   *  absolute-AU positions and inspector info. Earth/city/star-system rows delegate to
+   *  the reused regimes' own focusTargets() so the inspector text stays identical. */
+  private buildPickables(): void {
+    const auRadius = (km: number): number => (km * 1000) / AU_M;
+    // Sun
+    this.pickables.push({
+      id: 'sun', label: 'Sun', radius: SUN_RADIUS_AU,
+      position: (out) => out.set(0, 0, 0),
+      info: () => ({ title: 'Sun', rows: [['Type', 'G2V star'], ['Radius', '696,340 km']], blurb: SUN.blurb }),
+    });
+    // planets (Earth delegates to the EarthRegime inspector — Cities/Population/Era)
+    PLANETS.forEach((p, i) => {
+      const body = this.bodies[i + 1]!;
+      this.pickables.push({
+        id: p.id, label: p.label, radius: Math.max(auRadius(p.radiusKm), 1e-6),
+        childRegime: p.childRegime,
+        position: (out) => out.copy(body.world),
+        info: (clock) => (p.id === 'earth' ? this.earth.focusTargets()[0]!.info(clock) : planetInfo(p)),
+      });
+    });
+    // nearest stars
+    this.starBodies.forEach((sb, i) => {
+      const s = STARS[i]!;
+      this.pickables.push({
+        id: `star-${i}`, label: s.name, radius: 0.25,
+        position: (out) => out.copy(sb.body.world),
+        info: () => starInfo(s.name, s.ly, s.k),
+      });
+    });
+    // galactic centre
+    this.pickables.push({
+      id: 'gc', label: 'Galactic Centre', radius: 0.5 * KPC_AU,
+      position: (out) => out.copy(this.gcBody.world),
+      info: () => ({ title: 'Galactic Centre', rows: [['Distance', '~8.2 kpc'], ['Object', 'Sgr A*']], blurb: 'The supermassive black hole at the heart of the Milky Way.' }),
+    });
+    this.focusTarget = this.pickables[0]!; // start focused on the Sun
+  }
+
+  /** the band the camera is currently in (matches the legacy regime ids) */
+  private currentBandId(): string {
+    if (this.activeStarName) return 'starsystem';
+    const earthCamDist = this.earthBody.world.distanceTo(this.fo.camWorld);
+    if (this.surface.object3d.visible) return 'surface';
+    if (earthCamDist < EARTH_GLOBE_SHOW) return 'earth';
+    const d = 10 ** this.logDist;
+    if (d < 300) return 'solar';
+    if (d < 5e8) return 'galaxy';
+    return 'universe';
+  }
+
+  private static readonly BAND_LABEL: Record<string, string> = {
+    universe: 'Cosmos', galaxy: 'Milky Way', solar: 'Solar System', earth: 'Earth', surface: 'City',
+  };
+
+  get active(): { readonly label: string } {
+    const id = this.currentBandId();
+    if (id === 'starsystem') return { label: this.activeStarName ?? 'Star System' };
+    return { label: UnifiedWorld.BAND_LABEL[id] ?? 'Cosmos' };
+  }
+
+  get focus(): FocusTarget {
+    return this.focusTarget;
+  }
+
+  breadcrumb(): Breadcrumb[] {
+    const cur = this.currentBandId();
+    if (cur === 'starsystem') {
+      return [
+        { id: 'galaxy', label: 'Cosmos', active: false },
+        { id: 'galaxy', label: 'Milky Way', active: false },
+        { id: 'starsystem', label: this.activeStarName ?? 'Star System', active: true },
+      ];
+    }
+    return [
+      ['universe', 'Cosmos'], ['galaxy', 'Milky Way'], ['solar', 'Solar System'], ['earth', 'Earth'], ['surface', 'City'],
+    ].map(([id, label]) => ({ id: id!, label: label!, active: id === cur }));
+  }
+
+  /** fly to a named band (sets the smooth-zoom target + focus — no cross-fade) */
+  goTo(id: string): void {
+    switch (id) {
+      case 'universe': this.focusSun(); this.targetLog = this.MAX_LOG; break;
+      case 'galaxy': this.focusSun(); this.targetLog = Math.log10(7e8); break;
+      case 'solar': this.focusSun(); this.targetLog = Math.log10(30); break;
+      case 'earth': this.focusEarth(); this.targetLog = Math.log10(EARTH_RADIUS_AU * 8); break;
+      case 'surface': this.focusCity(); this.targetLog = Math.log10(CITY_RADIUS_AU * 5); break;
+      case 'starsystem': if (this.activeStarName) { this.focusStar(this.activeStarName); this.targetLog = Math.log10(6); } break;
+    }
+    this.onChange?.();
+  }
+
+  /** focus a body: orbit + look at it, and let the smooth-zoom keep the current dist */
+  focusOn(target: FocusTarget): void {
+    this.focusTarget = target;
+    this.setCameraFocus(() => target.position(this.focusGetTmp), target.radius);
+    this.onChange?.();
+  }
+
+  /** dive into a body = focus it and zoom in close (the unified analogue of descent) */
+  diveInto(target: FocusTarget): void {
+    this.focusOn(target);
+    this.targetLog = Math.max(this.minLog, Math.log10(target.radius * 6));
+  }
+
+  /** every selectable body currently in play (adds the active star-system's planets) */
+  pickTargets(): FocusTarget[] {
+    if (!this.activeStarName) return this.pickables;
+    const star = this.starBodies.find((s) => s.name === this.activeStarName);
+    if (!star) return this.pickables;
+    const origin = star.body.world;
+    const local = this.starSystem.focusTargets().map<FocusTarget>((t) => ({
+      id: t.id, label: t.label, radius: t.radius,
+      position: (out) => t.position(out).add(origin),
+      info: (clock) => t.info(clock),
+    }));
+    return [...this.pickables, ...local];
+  }
+
+  /** ray-pick the nearest body. The ray is camera-relative (camera at origin); shift
+   *  it into absolute AU space and test against the targets' absolute positions. */
+  pick(ray: Ray): FocusTarget | null {
+    const r = ray.clone();
+    r.origin.add(this.fo.camWorld);
+    let best: FocusTarget | null = null;
+    let bestDist = Infinity;
+    for (const t of this.pickTargets()) {
+      t.position(this.pickWorld);
+      const camDist = this.pickWorld.distanceTo(this.fo.camWorld);
+      const pickRadius = Math.max(t.radius * 1.6, camDist * 0.02); // tiny true-scale bodies stay clickable
+      this.pickSphere.set(this.pickWorld, pickRadius);
+      if (r.intersectSphere(this.pickSphere, this.pickHit)) {
+        const d = this.pickHit.distanceTo(r.origin);
+        if (d < bestDist) { bestDist = d; best = t; }
+      }
+    }
+    return best;
+  }
+
+  cosmicInfo(): CosmicInfo {
+    return { atCosmos: this.currentBandId() === 'universe', forming: false, ageGyr: 13.8 };
+  }
+
+  /** Big-Bang structure formation isn't ported to the unified frame yet (the cosmic
+   *  web is a deferred outer shell); a no-op keeps the HUD button harmless. */
+  bigBang(): void {
+    /* deferred — see the migration notes */
   }
 
   // ---- debug / verification hooks (mirrors zoomDemo) ----
@@ -488,23 +700,23 @@ export class UnifiedWorld {
 
   /** focus the camera on Earth (for verification) */
   focusEarth(): void {
-    this.focusOn(() => this.earthBody.world, EARTH_RADIUS_AU);
+    this.setCameraFocus(() => this.earthBody.world, EARTH_RADIUS_AU);
   }
 
   /** focus back on the Sun */
   focusSun(): void {
-    this.focusOn(null, SUN_RADIUS_AU);
+    this.setCameraFocus(null, SUN_RADIUS_AU);
   }
 
   /** focus a named nearest star (for verification) */
   focusStar(name: string): void {
     const sb = this.starBodies.find((x) => x.name === name);
-    if (sb) this.focusOn(() => sb.body.world, 0.25); // ~the orrery's star visual radius
+    if (sb) this.setCameraFocus(() => sb.body.world, 0.25); // ~the orrery's star visual radius
   }
 
   /** focus the city on the globe's pole (for verification) */
   focusCity(): void {
-    this.focusOn(() => {
+    this.setCameraFocus(() => {
       this.cityFocusTmp.copy(this.earthBody.world);
       this.cityFocusTmp.y += EARTH_RADIUS_AU; // the pole patch, one Earth-radius up
       return this.cityFocusTmp;

@@ -16,6 +16,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SimClock } from './core/clock';
 import type { FocusTarget } from './core/regime';
 import { ScaleManager } from './world/scaleManager';
+import type { WorldFacade } from './world/facade';
 import { WorldBus } from './world/bus';
 import { UnifiedWorld } from './world/unifiedWorld';
 import { DefenseGame } from './world/defenseGame';
@@ -57,10 +58,12 @@ const manager = new ScaleManager(UNIFIED ? new Scene() : scene, camera, controls
 // Only built under ?unified — its constructor populates the scene, so on the
 // legacy path it must not exist (else its bodies would pollute the live game).
 const unified = UNIFIED ? new UnifiedWorld(scene, camera, renderer, bus, simClock) : null;
-const game = new DefenseGame(manager, bus, simClock);
+// The UI talks to whichever world is live through the shared WorldFacade seam.
+const world: WorldFacade = unified ?? manager;
+const game = new DefenseGame(world, bus, simClock);
 
-const hud = new Hud(simClock, manager, bus, game);
-manager.onChange = () => hud.rebuild();
+const hud = new Hud(simClock, world, bus, game);
+world.onChange = () => hud.rebuild();
 
 // keyboard: 'c' launches a comet at Earth, 'd' deflects an incoming one
 window.addEventListener('keydown', (e) => {
@@ -83,15 +86,17 @@ canvas.addEventListener('click', (e) => {
   pointer.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
   raycaster.setFromCamera(pointer, camera);
   if (hud.tryDeflectAt(raycaster.ray)) return; // clicked a comet — shoot it down
-  const target = pick(e);
-  if (target) manager.focusOn(target);
+  const target = unified ? unified.pick(raycaster.ray) : pick(e);
+  if (target) world.focusOn(target);
 });
 
 canvas.addEventListener('dblclick', (e) => {
-  const target = pick(e);
+  pointer.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(pointer, camera);
+  const target = unified ? unified.pick(raycaster.ray) : pick(e);
   if (!target) return;
-  manager.focusOn(target);
-  if (target.childRegime) manager.diveInto(target);
+  world.focusOn(target);
+  if (unified || target.childRegime) world.diveInto(target); // unified: dblclick always dives (zooms in)
 });
 
 function pick(e: MouseEvent): FocusTarget | null {

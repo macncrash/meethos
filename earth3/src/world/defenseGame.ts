@@ -6,7 +6,7 @@
 import { DEFAULT_RATE_INDEX, SECONDS_PER_YEAR } from '../core/units';
 import type { SimClock } from '../core/clock';
 import type { Ray } from 'three';
-import type { ScaleManager } from './scaleManager';
+import type { WorldFacade } from './facade';
 import type { WorldBus } from './bus';
 
 const COOLDOWN_YEARS = 2.5; // deflector recharge (sim-years, so it scales with time-rate)
@@ -24,7 +24,7 @@ export class DefenseGame {
   highScore = 0;
 
   constructor(
-    private readonly manager: ScaleManager,
+    private readonly manager: WorldFacade,
     bus: WorldBus,
     private readonly clock: SimClock,
   ) {
