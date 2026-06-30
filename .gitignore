@@ -3,6 +3,9 @@ node_modules/
 
 # build output
 dist/
+dist-single/
+# single-file shareable build artifact (produced by `bun run build:single`)
+/Earth3.html
 
 # editor / OS
 .DS_Store

@@ -6,6 +6,12 @@
       "runtimeExecutable": "sh",
       "runtimeArgs": ["-c", "cd earth3 && bun run dev"],
       "port": 5174
+    },
+    {
+      "name": "earth3-single",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "cd earth3 && bunx vite preview -c vite.config.singlefile.ts --port 5180 --strictPort"],
+      "port": 5180
     }
   ]
 }
