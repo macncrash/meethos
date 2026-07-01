@@ -205,6 +205,14 @@ const STARS = [
   { name: 'Pollux', ra: 116.33, dec: 28.03, ly: 33.78, k: 4865 },
 ];
 
+/** one row in the go-to search palette: a named destination + how to reach it. */
+export interface SearchEntry {
+  name: string;
+  kind: 'planet' | 'star' | 'galaxy';
+  sub?: string; // secondary line, e.g. "8.6 ly · Canis Major"
+  target: FocusTarget;
+}
+
 export class UnifiedWorld implements WorldFacade {
   /** Camera-at-origin world rebasing — every body's f64 world position is placed
    *  relative to camWorld so only camera-relative f32 reaches the GPU. */
@@ -308,6 +316,7 @@ export class UnifiedWorld implements WorldFacade {
   private lastBandId = '';
   onChange?: () => void;
   private readonly focusGetTmp = new Vector3();
+  private readonly goToTmp = new Vector3();
   private readonly pickWorld = new Vector3();
   private readonly pickHit = new Vector3();
   private readonly pickSphere = new Sphere();
@@ -1064,6 +1073,45 @@ export class UnifiedWorld implements WorldFacade {
     this.focusTarget = target;
     this.setCameraFocus(() => target.position(this.focusGetTmp), target.radius);
     this.onChange?.();
+  }
+
+  /** A flat, searchable catalogue of every named destination — the bodies (Sun,
+   *  planets, Galactic Centre), the 14 nearest stars, the ~348 named HYG catalogue
+   *  stars, and the Local Group galaxies. Rebuilt on demand so it picks up the
+   *  asynchronously-loaded star catalogue; deduped so a hand-placed star (with its
+   *  own orrery) wins over its bare catalogue point of the same name. */
+  searchIndex(): SearchEntry[] {
+    const out: SearchEntry[] = [];
+    for (const t of this.pickables) {
+      const kind: SearchEntry['kind'] =
+        t.id === 'gc' ? 'galaxy' : t.id === 'sun' || t.id.startsWith('star-') ? 'star' : 'planet';
+      out.push({ name: t.label, kind, target: t });
+    }
+    for (const g of this.cosmicWeb.searchTargets()) out.push({ name: g.label, kind: 'galaxy', target: g });
+    const seen = new Set(out.map((e) => e.name.toLowerCase()));
+    for (const s of this.starCatalog.namedTargets()) {
+      if (seen.has(s.name.toLowerCase())) continue;
+      seen.add(s.name.toLowerCase());
+      out.push({ name: s.name, kind: 'star', sub: `${s.ly.toFixed(1)} ly · ${s.con}`, target: s.target });
+    }
+    return out;
+  }
+
+  /** Jump the orbit camera to a searched destination: focus it and frame it at a
+   *  sensible distance. `observe` instead drops into observer mode standing there,
+   *  so the real sky re-projects from that vantage (Earth from Mars, M31 from home). */
+  goToTarget(target: FocusTarget, observe = false): void {
+    this.exitObserver();
+    this.mergerMode = false;
+    this.flyActive = false;
+    this.selectedTarget = null;
+    if (observe) {
+      this.viewFrom(() => target.position(this.goToTmp), target.label);
+      return;
+    }
+    this.focusOn(target);
+    const frame = target.id === 'sun' ? Math.log10(30) : Math.log10(target.radius * 60);
+    this.targetLog = Math.max(this.minLog, Math.min(this.MAX_LOG, frame));
   }
 
   /** dive into a body = focus it and zoom in close (the unified analogue of descent) */

@@ -348,3 +348,84 @@ html, body {
 #route-fly:hover { background: rgba(110, 255, 200, 0.2); }
 #route-fly.flying { background: rgba(255, 160, 90, 0.14); border-color: rgba(255, 160, 90, 0.5); }
 @media (max-width: 640px) { #routepanel { display: none; } }
+
+/* ---- go-to search palette (press /) ---- */
+#searchbtn {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  border: 1px solid var(--panel-line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink-dim);
+  font: 12px/1 var(--font);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+#searchbtn:hover { color: var(--ink); border-color: var(--accent2); }
+
+#search {
+  position: fixed;
+  top: 54px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  width: min(440px, 92vw);
+  background: var(--panel);
+  border: 1px solid var(--accent2);
+  border-radius: 12px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(14px);
+  overflow: hidden;
+}
+#search-input {
+  width: 100%;
+  padding: 13px 16px;
+  border: none;
+  border-bottom: 1px solid var(--panel-line);
+  background: transparent;
+  color: var(--ink);
+  font: 15px/1 var(--font);
+  outline: none;
+}
+#search-input::placeholder { color: var(--ink-dim); }
+#search-results { list-style: none; margin: 0; padding: 4px; max-height: 46vh; overflow-y: auto; }
+#search-results li {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+#search-results li.sel { background: rgba(122, 168, 255, 0.18); }
+#search-results li .s-name { color: var(--ink); font-size: 13px; }
+#search-results li.sel .s-name { color: #fff; }
+#search-results li .s-sub { color: var(--ink-dim); font-size: 11px; margin-left: auto; white-space: nowrap; }
+#search-results li .s-kind {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--panel-line);
+  color: var(--accent2);
+}
+#search-results li .s-kind.k-star { color: #ffd98a; border-color: rgba(255, 217, 138, 0.3); }
+#search-results li .s-kind.k-planet { color: var(--accent); border-color: rgba(74, 214, 200, 0.3); }
+#search-results li .s-kind.k-galaxy { color: #c9a8ff; border-color: rgba(201, 168, 255, 0.3); }
+#search-results .s-empty { padding: 12px; color: var(--ink-dim); font-size: 12px; text-align: center; }
+.search-foot {
+  padding: 8px 14px;
+  border-top: 1px solid var(--panel-line);
+  color: var(--ink-dim);
+  font-size: 11px;
+}
+.search-foot b { color: var(--accent2); font-weight: 600; }

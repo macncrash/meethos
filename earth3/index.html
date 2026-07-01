@@ -15,6 +15,14 @@
     <!-- Top-right: focus / info readout -->
     <aside id="inspector" hidden></aside>
 
+    <!-- Top-center: jump-to search (press /) — type a name, ↵ fly there, ⇧↵ view from there -->
+    <button id="searchbtn" title="Search &amp; go to (press /)">⌕ <span>Search</span></button>
+    <div id="search" hidden role="dialog" aria-label="Search destinations">
+      <input id="search-input" type="text" autocomplete="off" spellcheck="false" placeholder="Go to a planet, star or galaxy…" />
+      <ul id="search-results"></ul>
+      <div class="search-foot"><b>↵</b> go to · <b>⇧↵</b> view from · <b>esc</b> close</div>
+    </div>
+
     <!-- Left: route planner (shift-click bodies to add waypoints) -->
     <div id="routepanel" hidden>
       <div class="rp-head"><span>◇ Route</span><button id="route-clear" title="Clear route">✕</button></div>
@@ -78,7 +86,7 @@
       <span id="label-level">Normal</span>
     </div>
 
-    <div id="hint">scroll to zoom · drag to orbit · double-click a body to dive in · hover to name · <b>c</b> comet · <b>v</b> view from · click or <b>d</b> to deflect</div>
+    <div id="hint"><b>/</b> search · scroll to zoom · drag to orbit · double-click to dive in · hover to name · <b>c</b> comet · <b>v</b> view from · <b>d</b> deflect</div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

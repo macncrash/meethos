@@ -41,7 +41,7 @@ export class CosmicWeb {
   readonly group = new Group();
 
   private readonly homePos = new Vector3(0, 0, 0); // the Milky Way sits at the frame origin
-  private readonly localGroup: Array<{ sprite: Sprite; label: Sprite; offset: Vector3; size: number }> = [];
+  private readonly localGroup: Array<{ sprite: Sprite; label: Sprite; offset: Vector3; size: number; name: string; mly: number; isTarget: boolean }> = [];
   private readonly targets_: FocusTarget[] = [];
   private readonly home: Sprite;
   private readonly homeMarker: Sprite;
@@ -181,10 +181,11 @@ export class CosmicWeb {
       const offset = dir.multiplyScalar((5 + g.mly * 5) * COSMIC_SCALE);
       const sprite = new Sprite(new SpriteMaterial({ map: glowTexture(new Color(g.col)), blending: AdditiveBlending, depthWrite: false, transparent: true }));
       sprite.scale.setScalar(SPRITE * g.size);
+      sprite.position.copy(this.homePos).add(offset); // valid before the first step()
       this.group.add(sprite);
       const label = makeLabel(g.name, g.col, 0.036);
       this.group.add(label);
-      this.localGroup.push({ sprite, label, offset, size: g.size });
+      this.localGroup.push({ sprite, label, offset, size: g.size, name: g.name, mly: g.mly, isTarget: g.target });
       if (g.target) {
         this.targets_.push({
           id: 'andromeda', label: g.name, radius: SPRITE * 3,
@@ -222,6 +223,25 @@ export class CosmicWeb {
 
   targets(): FocusTarget[] {
     return this.targets_;
+  }
+
+  /** Searchable destinations at the cosmic scale: the Milky Way, Andromeda and the
+   *  Cosmic Web (rich cards from targets_) plus the rest of the Local Group. */
+  searchTargets(): FocusTarget[] {
+    const dwarfs = this.localGroup
+      .filter((lg) => !lg.isTarget) // Andromeda already has a richer card in targets_
+      .map<FocusTarget>((lg) => ({
+        id: `gal-${lg.name}`,
+        label: lg.name,
+        radius: SPRITE * lg.size,
+        position: (out) => out.copy(lg.sprite.position),
+        info: () => ({
+          title: lg.name,
+          rows: [['Distance', `${lg.mly} Mly`], ['Group', 'Local Group']],
+          blurb: 'A galaxy in our Local Group, bound to the Milky Way by gravity.',
+        }),
+      }));
+    return [...this.targets_, ...dwarfs];
   }
 
   get cosmicAgeGyr(): number {

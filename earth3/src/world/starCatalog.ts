@@ -202,6 +202,31 @@ export class StarCatalog {
     };
   }
 
+  /** Every named catalogue star as a searchable destination (name, constellation and
+   *  distance for ranking, plus a FocusTarget to fly/observe from). Empty until the
+   *  catalogue has loaded. The Sun is excluded — it is already a body pickable. */
+  namedTargets(): Array<{ name: string; con: string; ly: number; target: FocusTarget }> {
+    if (!this.worldPos) return [];
+    const pos = this.worldPos;
+    const out: Array<{ name: string; con: string; ly: number; target: FocusTarget }> = [];
+    for (const [idx, info] of this.names) {
+      if (idx === this.sunIndex) continue;
+      out.push({
+        name: info.name,
+        con: info.con,
+        ly: (this.distPc?.[idx] ?? 0) * LY_PER_PC,
+        target: {
+          id: `hyg-${idx}`,
+          label: info.name,
+          radius: 0.25,
+          position: (out2) => out2.set(pos[idx * 3]!, pos[idx * 3 + 1]!, pos[idx * 3 + 2]!),
+          info: () => this.starCard(idx),
+        },
+      });
+    }
+    return out;
+  }
+
   private starCard(i: number): InspectorInfo {
     const named = this.names.get(i);
     const dpc = this.distPc?.[i] ?? 0;

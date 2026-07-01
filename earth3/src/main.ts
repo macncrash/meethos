@@ -18,7 +18,7 @@ import type { FocusTarget } from './core/regime';
 import { ScaleManager } from './world/scaleManager';
 import type { WorldFacade } from './world/facade';
 import { WorldBus } from './world/bus';
-import { UnifiedWorld } from './world/unifiedWorld';
+import { UnifiedWorld, type SearchEntry } from './world/unifiedWorld';
 import { DefenseGame } from './world/defenseGame';
 import { Hud } from './ui/hud';
 import { createBackdropStars } from './render/backdrop';
@@ -69,6 +69,7 @@ world.onChange = () => hud.rebuild();
 // keyboard: 'c' launches a comet at Earth, 'd' deflects an incoming one, 'v' toggles
 // observer mode (stand on the focused body and look out at the real sky from there)
 window.addEventListener('keydown', (e) => {
+  if (document.getElementById('search')?.hidden === false) return; // the search palette owns the keyboard while open
   if (e.key === 'c' || e.key === 'C') hud.fireComet();
   else if (e.key === 'd' || e.key === 'D') hud.deflect();
   else if ((e.key === 'v' || e.key === 'V') && unified) {
@@ -132,6 +133,97 @@ routeFly?.addEventListener('click', () => { if (!unified) return; if (unified.fl
 document.getElementById('route-clear')?.addEventListener('click', () => unified?.clearRoute());
 applyRouteSpeed();
 
+// ---- go-to search palette (press /) — type a name, ↵ fly there, ⇧↵ view from there ----
+const searchBtn = document.getElementById('searchbtn');
+const searchBox = document.getElementById('search');
+const searchInput = document.getElementById('search-input') as HTMLInputElement | null;
+const searchResults = document.getElementById('search-results');
+// a friendly starting set shown before the user types anything
+const SEARCH_DEFAULTS = ['Earth', 'Mars', 'Saturn', 'Jupiter', 'Sun', 'Sirius', 'Alpha Centauri', 'Andromeda (M31)', 'Vega'];
+let searchAll: SearchEntry[] = [];
+let searchHits: SearchEntry[] = [];
+let searchSel = 0;
+
+const searchOpen = (): boolean => !!searchBox && !searchBox.hidden;
+
+// rank a candidate: exact > prefix > word-start > substring (0 = no match)
+function matchScore(name: string, q: string): number {
+  if (name === q) return 100;
+  if (name.startsWith(q)) return 80 - name.length * 0.02;
+  if (name.split(/[\s'()·.-]+/).some((w) => w.startsWith(q))) return 60;
+  const at = name.indexOf(q);
+  return at >= 0 ? 40 - at * 0.1 : 0;
+}
+
+function renderSearchResults(): void {
+  if (!searchResults) return;
+  if (searchHits.length === 0) {
+    searchResults.innerHTML = '<li class="s-empty">No match — try a planet, star or galaxy name.</li>';
+    return;
+  }
+  searchResults.replaceChildren(...searchHits.map((e, i) => {
+    const li = document.createElement('li');
+    if (i === searchSel) li.className = 'sel';
+    li.innerHTML =
+      `<span class="s-kind k-${e.kind}">${e.kind}</span><span class="s-name">${e.name}</span>` +
+      (e.sub ? `<span class="s-sub">${e.sub}</span>` : '');
+    li.addEventListener('mousemove', () => { if (searchSel !== i) { searchSel = i; renderSearchResults(); } });
+    li.addEventListener('click', (ev) => goSearch(e, ev.shiftKey));
+    return li;
+  }));
+}
+
+function runSearch(): void {
+  const q = (searchInput?.value ?? '').trim().toLowerCase();
+  if (!q) {
+    searchHits = SEARCH_DEFAULTS.map((n) => searchAll.find((e) => e.name === n)).filter((e): e is SearchEntry => !!e);
+  } else {
+    searchHits = searchAll
+      .map((e) => ({ e, s: matchScore(e.name.toLowerCase(), q) }))
+      .filter((x) => x.s > 0)
+      .sort((a, b) => b.s - a.s)
+      .slice(0, 9)
+      .map((x) => x.e);
+  }
+  searchSel = 0;
+  renderSearchResults();
+}
+
+function openSearch(): void {
+  if (!unified || !searchBox || !searchInput) return;
+  searchAll = unified.searchIndex(); // rebuilt each open → picks up the async-loaded catalogue
+  searchBox.hidden = false;
+  searchInput.value = '';
+  runSearch();
+  searchInput.focus();
+}
+function closeSearch(): void {
+  if (searchBox) searchBox.hidden = true;
+  searchInput?.blur();
+}
+function goSearch(e: SearchEntry, observe: boolean): void {
+  unified?.goToTarget(e.target, observe);
+  closeSearch();
+}
+
+if (LEGACY && searchBtn) searchBtn.hidden = true; // search drives the unified frame only
+searchBtn?.addEventListener('click', openSearch);
+searchInput?.addEventListener('input', runSearch);
+searchInput?.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') { e.preventDefault(); searchSel = Math.min(searchHits.length - 1, searchSel + 1); renderSearchResults(); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); searchSel = Math.max(0, searchSel - 1); renderSearchResults(); }
+  else if (e.key === 'Enter') { e.preventDefault(); const hit = searchHits[searchSel]; if (hit) goSearch(hit, e.shiftKey); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeSearch(); }
+});
+// open on '/' or ⌘/Ctrl-K (unless already typing in a field)
+window.addEventListener('keydown', (e) => {
+  if (searchOpen() || document.activeElement instanceof HTMLInputElement) return;
+  if (e.key === '/' || (e.key.toLowerCase() === 'k' && (e.metaKey || e.ctrlKey))) {
+    e.preventDefault();
+    openSearch();
+  }
+});
+
 // ---- pointer picking (click = focus, double-click = dive) ----
 const raycaster = new Raycaster();
 const pointer = new Vector2();
@@ -152,6 +244,7 @@ canvas.addEventListener('pointermove', (e) => {
 });
 
 canvas.addEventListener('click', (e) => {
+  if (searchOpen()) { closeSearch(); return; } // clicking the scene dismisses the search palette
   if (downAt.distanceTo(new Vector2(e.clientX, e.clientY)) > 5) return; // was a drag
   pointer.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
   raycaster.setFromCamera(pointer, camera);
