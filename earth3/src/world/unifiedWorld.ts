@@ -55,6 +55,7 @@ import { StarSystemRegime } from '../regimes/starSystem';
 import { SurfaceRegime } from '../regimes/surface';
 import { CosmicWeb } from './cosmicWeb';
 import { StarCatalog } from './starCatalog';
+import { ConstellationFigures } from './constellationFigures';
 import { GalaxyMerger } from './galaxyMerger';
 
 const ORIGIN = new Vector3(0, 0, 0);
@@ -208,9 +209,10 @@ const STARS = [
 /** one row in the go-to search palette: a named destination + how to reach it. */
 export interface SearchEntry {
   name: string;
-  kind: 'planet' | 'star' | 'galaxy';
+  kind: 'planet' | 'star' | 'galaxy' | 'constellation';
   sub?: string; // secondary line, e.g. "8.6 ly · Canis Major"
-  target: FocusTarget;
+  target?: FocusTarget; // a place to fly to (bodies/stars/galaxies)
+  constellationId?: string; // a sky figure to aim at instead (IAU code)
 }
 
 export class UnifiedWorld implements WorldFacade {
@@ -253,6 +255,7 @@ export class UnifiedWorld implements WorldFacade {
   // the REAL naked-eye sky — ~8,900 HYG stars at true positions, rendered by apparent
   // magnitude and re-projectable from any observer. Loaded async (appears when ready).
   private readonly starCatalog = new StarCatalog();
+  private readonly constellations = new ConstellationFigures();
 
   // Layer 3 — the Milky Way × Andromeda merger (a live restricted N-body sim), shown
   // as a self-contained Cosmos-band overlay when toggled.
@@ -390,6 +393,11 @@ export class UnifiedWorld implements WorldFacade {
     // the real naked-eye sky — loads async, then appears (observer defaults to Earth)
     scene.add(this.starCatalog.group);
     void this.starCatalog.load();
+
+    // constellation figures — a fixed-direction celestial sphere (NOT rebased); shown only
+    // in observer mode when a constellation is selected. Camera sits at origin, so the
+    // lines render at their sky directions and align with the catalogue stars.
+    scene.add(this.constellations.group);
 
     // the galaxy-merger overlay (hidden until toggled)
     this.merger.group.visible = false;
@@ -805,6 +813,10 @@ export class UnifiedWorld implements WorldFacade {
     this.starCatalog.group.visible = !showCosmos;
     if (!showCosmos) this.starCatalog.group.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
 
+    // constellation figures ride no origin (they are directions): shown only when observing
+    // and a constellation is selected — from Earth/near-Sun they lie on the real stars.
+    this.constellations.group.visible = observer && this.constellations.active !== null;
+
     // the Earth band: place the true-scale globe at Earth's heliocentric AU position,
     // shown only when the camera is close enough that the globe is more than a glint.
     const earthWorld = this.earthBody.world;
@@ -1114,6 +1126,10 @@ export class UnifiedWorld implements WorldFacade {
       seen.add(s.name.toLowerCase());
       out.push({ name: s.name, kind: 'star', sub: `${s.ly.toFixed(1)} ly · ${s.con}`, target: s.target });
     }
+    // constellations: aim the sky at the real asterism figure, from Earth
+    for (const c of this.constellations.list()) {
+      out.push({ name: c.name, kind: 'constellation', sub: `figure · ${c.id}`, constellationId: c.id });
+    }
     return out;
   }
 
@@ -1325,6 +1341,7 @@ export class UnifiedWorld implements WorldFacade {
    *  zoom the FOV with the wheel; the sky's apparent magnitudes re-project from here. */
   viewFrom(get: () => Vector3, label = 'here'): void {
     this.cancelFlyTo(); // observer supersedes a flight — but restore focusGet so exiting isn't stale
+    this.constellations.setActive(null); // a body-sky view clears any constellation figure
     this.observerGet = get;
     this.observerLabel = label;
     this.fov = 55;
@@ -1342,6 +1359,25 @@ export class UnifiedWorld implements WorldFacade {
     if (!this.observerGet) return;
     this.observerGet = null;
     this.starCatalog.setObserver(ORIGIN);
+    this.constellations.setActive(null); // leaving the sky hides any constellation figure
+    this.onChange?.();
+  }
+
+  /** Show a constellation's real asterism figure on the sky and aim the observer at it.
+   *  Enters observer mode from Earth if not already standing somewhere (asterisms are an
+   *  Earth-vantage construct). `id` is the IAU 3-letter code. */
+  showConstellation(id: string): void {
+    // Asterisms are a geocentric construct: the figure is drawn at FIXED sky directions, so
+    // it only lands on the stars from a near-Sun vantage (from a distant star the parallax-
+    // reprojected sky drifts degrees away). Keep the current spot only if it's inside the
+    // solar system (a planet); otherwise snap to Earth.
+    const nearSun = this.isObserving && this.observerGet!().length() < OBSERVER_SOLAR_AU;
+    if (!nearSun) this.viewFromEarth();
+    const centroid = this.constellations.setActive(id);
+    if (!centroid) return;
+    // aim the free-look at the figure's centre (matches the observer look = −spherical(yaw,pitch))
+    this.yaw = Math.atan2(-centroid.x, -centroid.z);
+    this.pitch = Math.max(-1.55, Math.min(1.55, Math.asin(Math.max(-1, Math.min(1, -centroid.y)))));
     this.onChange?.();
   }
 

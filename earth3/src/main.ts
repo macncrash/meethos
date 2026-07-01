@@ -139,7 +139,7 @@ const searchBox = document.getElementById('search');
 const searchInput = document.getElementById('search-input') as HTMLInputElement | null;
 const searchResults = document.getElementById('search-results');
 // a friendly starting set shown before the user types anything
-const SEARCH_DEFAULTS = ['Earth', 'Mars', 'Saturn', 'Jupiter', 'Sun', 'Sirius', 'Alpha Centauri', 'Andromeda (M31)', 'Vega'];
+const SEARCH_DEFAULTS = ['Earth', 'Mars', 'Saturn', 'Jupiter', 'Sun', 'Sirius', 'Orion', 'Andromeda (M31)', 'Vega'];
 let searchAll: SearchEntry[] = [];
 let searchHits: SearchEntry[] = [];
 let searchSel = 0;
@@ -202,7 +202,8 @@ function closeSearch(): void {
   searchInput?.blur();
 }
 function goSearch(e: SearchEntry, observe: boolean): void {
-  unified?.goToTarget(e.target, observe);
+  if (e.constellationId) unified?.showConstellation(e.constellationId); // aim the sky at the figure
+  else if (e.target) unified?.goToTarget(e.target, observe);
   closeSearch();
 }
 
