@@ -272,6 +272,11 @@ export class UnifiedWorld implements WorldFacade {
   // that rides −camWorld) and must be rebased with fo.rel() before projecting.
   private readonly labelEntries: { sprite: Sprite; priority: number; world?: boolean }[] = [];
   private readonly projTmp = new Vector3();
+  /** max persistent labels the declutter keeps (0 = hover-only "explorer" mode) */
+  private maxLabels = 12;
+  /** the object the pointer is hovering — its name is always shown (hoverLabel) */
+  private hoveredTarget: FocusTarget | null = null;
+  private hoverLabel: Sprite | null = null;
 
   // ---- WorldFacade state (the band/inspector/picking surface the HUD talks to) ----
   /** all selectable major bodies (Sun, planets, stars, GC), positions in absolute AU */
@@ -441,8 +446,32 @@ export class UnifiedWorld implements WorldFacade {
       for (let k = 0; k < keptX.length; k++) {
         if (Math.abs(keptX[k]! - sx) < 78 && Math.abs(keptY[k]! - sy) < 15) { overlap = true; break; }
       }
-      if (overlap) s.visible = false;
+      // hide over the density cap OR on overlap (the hover label is separate + always on)
+      if (overlap || keptX.length >= this.maxLabels) s.visible = false;
       else { keptX.push(sx); keptY.push(sy); }
+    }
+  }
+
+  /** label density from the bottom-left slider (0 = hover-only "explorer" mode). */
+  setMaxLabels(n: number): void {
+    this.maxLabels = Math.max(0, n);
+  }
+
+  /** the pointer-hovered object; its name is always shown regardless of density. */
+  setHovered(target: FocusTarget | null): void {
+    if ((target?.id ?? null) === (this.hoveredTarget?.id ?? null)) return;
+    this.hoveredTarget = target;
+    if (this.hoverLabel) {
+      this.scene.remove(this.hoverLabel);
+      const mat = this.hoverLabel.material as SpriteMaterial;
+      mat.map?.dispose();
+      mat.dispose();
+      this.hoverLabel = null;
+    }
+    if (target) {
+      this.hoverLabel = makeLabel(target.label, 0xbfe8ff, 0.042);
+      this.hoverLabel.renderOrder = 5;
+      this.scene.add(this.hoverLabel);
     }
   }
 
@@ -620,6 +649,12 @@ export class UnifiedWorld implements WorldFacade {
       this.camera.far = Math.max(dist * 1e3, 1.5e10);
     }
     this.camera.updateProjectionMatrix();
+
+    // the hover label always shows the hovered object's name (bypasses the density cap)
+    if (this.hoveredTarget && this.hoverLabel) {
+      this.fo.place(this.hoverLabel, this.hoveredTarget.position(this.tmp));
+      this.hoverLabel.visible = true;
+    }
 
     this.declutterLabels(); // hide overlapping labels now the camera is final
   }

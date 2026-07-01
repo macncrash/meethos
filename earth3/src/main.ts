@@ -77,6 +77,20 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+// bottom-left label-density slider (0 = hover-only explorer mode … max = everything)
+const LABEL_LEVELS: Array<[string, number]> = [
+  ['Off', 0], ['Few', 4], ['Some', 9], ['Normal', 16], ['Many', 32], ['Lots', 90], ['All', 9999],
+];
+const labelSlider = document.getElementById('label-slider') as HTMLInputElement | null;
+const labelLevel = document.getElementById('label-level');
+function applyLabelDensity(): void {
+  const [name, max] = LABEL_LEVELS[Number(labelSlider?.value ?? 3)] ?? LABEL_LEVELS[3]!;
+  if (labelLevel) labelLevel.textContent = name;
+  unified?.setMaxLabels(max);
+}
+labelSlider?.addEventListener('input', applyLabelDensity);
+applyLabelDensity();
+
 // ---- pointer picking (click = focus, double-click = dive) ----
 const raycaster = new Raycaster();
 const pointer = new Vector2();
@@ -86,6 +100,15 @@ const hitPoint = new Vector3();
 const worldPos = new Vector3();
 
 canvas.addEventListener('pointerdown', (e) => downAt.set(e.clientX, e.clientY));
+
+// hover-to-name (explorer): highlight the object under the pointer (only when no
+// button is down, so it doesn't fight a drag). Unified frame only.
+canvas.addEventListener('pointermove', (e) => {
+  if (!unified || e.buttons !== 0) return;
+  pointer.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(pointer, camera);
+  unified.setHovered(unified.pick(raycaster.ray));
+});
 
 canvas.addEventListener('click', (e) => {
   if (downAt.distanceTo(new Vector2(e.clientX, e.clientY)) > 5) return; // was a drag

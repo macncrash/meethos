@@ -293,3 +293,26 @@ html, body {
   #hint { display: none; }
   #hud { gap: 14px; padding: 8px 12px; }
 }
+
+/* Bottom-left: label density control */
+#labelctl {
+  position: fixed;
+  left: 18px;
+  bottom: 18px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 13px;
+  background: var(--panel);
+  border: 1px solid var(--panel-line);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+  font-size: 11px;
+  color: var(--ink-dim);
+  letter-spacing: 0.03em;
+}
+#labelctl .lc-title { color: var(--ink); }
+#labelctl input[type='range'] { width: 96px; accent-color: var(--accent); cursor: pointer; }
+#label-level { min-width: 46px; }
+@media (max-width: 640px) { #labelctl { display: none; } }

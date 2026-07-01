@@ -58,7 +58,14 @@
       <div id="stats"></div>
     </footer>
 
-    <div id="hint">scroll to zoom · drag to orbit · double-click a body to dive in · <b>c</b> send a comet · click or <b>d</b> to deflect</div>
+    <!-- Bottom-left: label density (0 = hover only … max = everything) -->
+    <div id="labelctl">
+      <span class="lc-title">Labels</span>
+      <input id="label-slider" type="range" min="0" max="6" step="1" value="3" aria-label="Label density" />
+      <span id="label-level">Normal</span>
+    </div>
+
+    <div id="hint">scroll to zoom · drag to orbit · double-click a body to dive in · hover to name · <b>c</b> comet · <b>v</b> view from · click or <b>d</b> to deflect</div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>
