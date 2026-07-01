@@ -15,6 +15,18 @@
     <!-- Top-right: focus / info readout -->
     <aside id="inspector" hidden></aside>
 
+    <!-- Left: route planner (shift-click bodies to add waypoints) -->
+    <div id="routepanel" hidden>
+      <div class="rp-head"><span>◇ Route</span><button id="route-clear" title="Clear route">✕</button></div>
+      <ol id="route-list"></ol>
+      <div class="rp-speed">
+        <input id="route-speed" type="range" min="0" max="9" value="7" aria-label="Travel speed" />
+        <span id="route-speed-label">100c</span>
+      </div>
+      <div id="route-stats">—</div>
+      <button id="route-fly">▶ Fly the route</button>
+    </div>
+
     <!-- Top-center: cross-scale event toast -->
     <div id="toast" hidden></div>
 

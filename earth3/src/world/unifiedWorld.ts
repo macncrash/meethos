@@ -23,6 +23,7 @@ import {
   Color,
   Group,
   Light,
+  Line,
   LineBasicMaterial,
   LineLoop,
   Points,
@@ -249,6 +250,18 @@ export class UnifiedWorld implements WorldFacade {
   // as a self-contained Cosmos-band overlay when toggled.
   private readonly merger = new GalaxyMerger();
   private mergerMode = false;
+
+  // Layer 4 — route planner: an ordered list of waypoints (bodies/stars), a 3D path
+  // line, distance + relativistic travel time, and a "fly the route" journey.
+  private readonly route: { label: string; get: () => Vector3 }[] = [];
+  private routeLine: Line | null = null;
+  private routeSpeedC = 100; // travel speed in multiples of c (>1 = warp)
+  private flyActive = false;
+  private flyT = 0; // position along the polyline: 0 … route.length−1
+  private readonly flyDuration = 11; // wall-clock seconds for the whole journey
+  private readonly flyPos = new Vector3();
+  /** notify the route panel when waypoints/speed/fly state change */
+  onRouteChange?: () => void;
 
   // f64 orbit camera rig (yaw/pitch/log-distance) around a movable focus point
   private yaw = 0.6;
@@ -519,6 +532,130 @@ export class UnifiedWorld implements WorldFacade {
     return this.mergerMode;
   }
 
+  // ---- Layer 4: route planner ----
+
+  /** add a body/star to the end of the route (its position tracks if it moves) */
+  addWaypoint(target: FocusTarget): void {
+    const t = target;
+    this.route.push({ label: t.label, get: () => t.position(new Vector3()) });
+    this.rebuildRouteLine();
+    this.onRouteChange?.();
+  }
+
+  removeLastWaypoint(): void {
+    this.route.pop();
+    this.rebuildRouteLine();
+    this.onRouteChange?.();
+  }
+
+  clearRoute(): void {
+    this.route.length = 0;
+    this.flyActive = false;
+    this.rebuildRouteLine();
+    this.onRouteChange?.();
+  }
+
+  routeLabels(): string[] {
+    return this.route.map((w) => w.label);
+  }
+
+  setRouteSpeed(c: number): void {
+    this.routeSpeedC = c;
+    this.onRouteChange?.();
+  }
+
+  /** total distance + travel time at the current speed (relativistic below light speed) */
+  routeStats(): { totalLy: number; earthYears: number; shipYears: number; legs: number } {
+    let ly = 0;
+    let prev: Vector3 | null = null;
+    for (const w of this.route) {
+      const p = w.get();
+      if (prev) ly += prev.distanceTo(p) / AU_PER_LY;
+      prev = p;
+    }
+    const v = this.routeSpeedC;
+    const earthYears = v > 0 ? ly / v : 0;
+    const shipYears = v < 1 ? earthYears * Math.sqrt(Math.max(0, 1 - v * v)) : earthYears; // FTL: no dilation
+    return { totalLy: ly, earthYears, shipYears, legs: Math.max(0, this.route.length - 1) };
+  }
+
+  get flying(): boolean {
+    return this.flyActive;
+  }
+
+  /** 0..1 fraction of the route travelled (for the panel readout) */
+  get flyProgress(): number {
+    return this.route.length > 1 ? this.flyT / (this.route.length - 1) : 0;
+  }
+
+  startFly(): void {
+    if (this.route.length < 2) return;
+    this.exitObserver();
+    this.mergerMode = false;
+    this.flyActive = true;
+    this.flyT = 0;
+    // observer camera sits at the (moving) travel position; advanceFly aims it
+    this.viewFrom(() => this.flyPos, 'route');
+  }
+
+  stopFly(): void {
+    this.flyActive = false;
+    this.exitObserver();
+    this.onRouteChange?.();
+  }
+
+  /** advance the fly position along the route and aim the look toward the destination */
+  private advanceFly(realDt: number): void {
+    const segTotal = Math.max(1, this.route.length - 1);
+    this.flyT += (realDt / this.flyDuration) * segTotal;
+    if (this.flyT >= segTotal) {
+      this.flyT = segTotal;
+      this.flyActive = false;
+      this.exitObserver();
+      this.onRouteChange?.();
+      return;
+    }
+    const i = Math.min(Math.floor(this.flyT), segTotal - 1);
+    const a = this.route[i]!.get();
+    const b = this.route[i + 1]!.get();
+    this.flyPos.lerpVectors(a, b, this.flyT - i);
+    // aim the observer free-look along the travel direction (toward b)
+    const dx = b.x - this.flyPos.x, dy = b.y - this.flyPos.y, dz = b.z - this.flyPos.z;
+    const len = Math.hypot(dx, dy, dz) || 1;
+    this.yaw = Math.atan2(-dx / len, -dz / len);
+    this.pitch = Math.asin(Math.max(-1, Math.min(1, -dy / len)));
+  }
+
+  private rebuildRouteLine(): void {
+    if (this.routeLine) {
+      this.scene.remove(this.routeLine);
+      this.routeLine.geometry.dispose();
+      (this.routeLine.material as LineBasicMaterial).dispose();
+      this.routeLine = null;
+    }
+    if (this.route.length < 2) return;
+    const geom = new BufferGeometry();
+    geom.setAttribute('position', new BufferAttribute(new Float32Array(this.route.length * 3), 3));
+    this.routeLine = new Line(geom, new LineBasicMaterial({ color: 0x6effc8, transparent: true, opacity: 0.85, depthTest: false }));
+    this.routeLine.renderOrder = 4;
+    this.scene.add(this.routeLine);
+  }
+
+  /** each frame: refresh the route line's vertices to the current waypoint positions */
+  private updateRouteLine(): void {
+    if (!this.routeLine || this.route.length < 2) return;
+    const arr = this.routeLine.geometry.getAttribute('position') as BufferAttribute;
+    const a = arr.array as Float32Array;
+    for (let i = 0; i < this.route.length; i++) {
+      const p = this.route[i]!.get();
+      a[i * 3] = p.x - this.fo.camWorld.x;
+      a[i * 3 + 1] = p.y - this.fo.camWorld.y;
+      a[i * 3 + 2] = p.z - this.fo.camWorld.z;
+    }
+    arr.needsUpdate = true;
+    this.routeLine.visible = true;
+  }
+
   /** label density from the bottom-left slider (0 = hover-only "explorer" mode). */
   setMaxLabels(n: number): void {
     this.maxLabels = Math.max(0, n);
@@ -596,6 +733,8 @@ export class UnifiedWorld implements WorldFacade {
 
     // Layer 3: the merger overlay owns the whole view when active
     if (this.mergerMode) { this.updateMerger(realDt); return; }
+    // Layer 4: advance the route fly-through (drives the observer camera via flyPos)
+    if (this.flyActive) this.advanceFly(realDt);
 
     this.logDist += (this.targetLog - this.logDist) * Math.min(1, realDt * 7); // smooth zoom
     this.logDist = Math.max(this.minLog, Math.min(this.MAX_LOG, this.logDist));
@@ -625,6 +764,7 @@ export class UnifiedWorld implements WorldFacade {
     // the galaxy cloud + comet field ride floating origin by translating their groups
     this.galaxy.group.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
     this.cometGroup.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
+    this.updateRouteLine(); // the planned route path (camera-relative)
 
     // the cosmic web: Big-Bang formation runs whenever active; shown + rebased only
     // at the Cosmos band (zoomed out past the galaxy) — never in observer mode.

@@ -91,6 +91,47 @@ function applyLabelDensity(): void {
 labelSlider?.addEventListener('input', applyLabelDensity);
 applyLabelDensity();
 
+// ---- route planner (shift-click bodies/stars to add waypoints) ----
+const ROUTE_SPEEDS = [0.1, 0.3, 0.6, 0.9, 0.99, 1, 10, 100, 1000, 9000]; // × c
+const routePanel = document.getElementById('routepanel');
+const routeList = document.getElementById('route-list');
+const routeStatsEl = document.getElementById('route-stats');
+const routeSpeed = document.getElementById('route-speed') as HTMLInputElement | null;
+const routeSpeedLabel = document.getElementById('route-speed-label');
+const routeFly = document.getElementById('route-fly');
+const fmtLy = (ly: number): string => (ly >= 1e6 ? `${(ly / 1e6).toFixed(2)} Mly` : ly >= 1e3 ? `${(ly / 1e3).toFixed(1)} kly` : `${ly.toFixed(2)} ly`);
+const fmtYr = (y: number): string => (y >= 1e6 ? `${(y / 1e6).toFixed(2)} Myr` : y >= 1e3 ? `${(y / 1e3).toFixed(1)} kyr` : `${y.toFixed(1)} yr`);
+const routeSpeedC = (): number => ROUTE_SPEEDS[Number(routeSpeed?.value ?? 7)] ?? 100;
+function renderRoute(): void {
+  if (!unified || !routePanel) return;
+  const labels = unified.routeLabels();
+  routePanel.hidden = labels.length === 0;
+  if (labels.length === 0) return;
+  if (routeList) routeList.replaceChildren(...labels.map((name, i) => {
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="rp-num">${i + 1}</span><span>${name}</span>`;
+    return li;
+  }));
+  const s = unified.routeStats();
+  if (routeStatsEl) routeStatsEl.innerHTML = unified.flying
+    ? `Flying… <b>${Math.round(unified.flyProgress * 100)}%</b>`
+    : `Distance <b>${fmtLy(s.totalLy)}</b><br>Earth time <b>${fmtYr(s.earthYears)}</b>${routeSpeedC() < 1 ? `<br>Ship time <b>${fmtYr(s.shipYears)}</b>` : ''}`;
+  if (routeFly) {
+    routeFly.classList.toggle('flying', unified.flying);
+    routeFly.textContent = unified.flying ? '■ Stop' : labels.length >= 2 ? '▶ Fly the route' : 'Add ≥2 waypoints';
+  }
+}
+function applyRouteSpeed(): void {
+  const v = routeSpeedC();
+  if (routeSpeedLabel) routeSpeedLabel.textContent = v < 1 ? `${v} c` : v === 1 ? 'light (c)' : `${v.toLocaleString()}× c`;
+  unified?.setRouteSpeed(v); // fires onRouteChange → renderRoute
+}
+if (unified) unified.onRouteChange = renderRoute;
+routeSpeed?.addEventListener('input', applyRouteSpeed);
+routeFly?.addEventListener('click', () => { if (!unified) return; if (unified.flying) unified.stopFly(); else unified.startFly(); renderRoute(); });
+document.getElementById('route-clear')?.addEventListener('click', () => unified?.clearRoute());
+applyRouteSpeed();
+
 // ---- pointer picking (click = focus, double-click = dive) ----
 const raycaster = new Raycaster();
 const pointer = new Vector2();
@@ -116,6 +157,12 @@ canvas.addEventListener('click', (e) => {
   raycaster.setFromCamera(pointer, camera);
   if (hud.tryDeflectAt(raycaster.ray)) return; // clicked a comet — shoot it down
   const target = unified ? unified.pick(raycaster.ray) : pick(e);
+  // shift-click adds the body/star under the pointer to the route
+  if (unified && e.shiftKey) {
+    const wp = target ?? unified.pickStar(pointer.x, pointer.y);
+    if (wp) unified.addWaypoint(wp);
+    return;
+  }
   if (target) { world.focusOn(target); return; }
   // no body under the pointer — try the star catalogue (inspect its card, don't fly there)
   if (unified) unified.select(unified.pickStar(pointer.x, pointer.y));
@@ -161,6 +208,7 @@ function animate(): void {
   else manager!.update(simClock, realDt);
   game.update(simClock);
   hud.tick();
+  if (unified?.flying && routeStatsEl) routeStatsEl.innerHTML = `Flying… <b>${Math.round(unified.flyProgress * 100)}%</b>`;
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
