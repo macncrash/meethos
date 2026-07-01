@@ -22,6 +22,7 @@ export class Hud {
   private readonly deflectBtn = byId('deflect-btn');
   private readonly defenseBtn = byId('defense-btn');
   private readonly bigbangBtn = byId('bigbang-btn');
+  private readonly mergerBtn = byId('merger-btn');
   private readonly gamebar = byId('gamebar');
   private readonly healthFill = byId('health-fill');
   private readonly gameStats = byId('game-stats');
@@ -42,6 +43,10 @@ export class Hud {
     this.bigbangBtn.addEventListener('click', () => {
       this.manager.bigBang();
       this.showToast('✦ The Big Bang — 13.8 billion years in a breath', 3200);
+    });
+    this.mergerBtn.addEventListener('click', () => {
+      this.manager.toggleMerger?.();
+      if (this.manager.mergerActive) this.showToast('⟳ The Milky Way and Andromeda collide — ~4.5 Gyr from now', 3600);
     });
     byId('restart-btn').addEventListener('click', () => this.startGame());
     bus.onImpact((e) => {
@@ -175,7 +180,10 @@ export class Hud {
 
     // Big Bang control + cosmic-age readout, only at the Cosmos scale
     const cos = this.manager.cosmicInfo();
-    this.bigbangBtn.hidden = !cos.atCosmos;
+    this.bigbangBtn.hidden = !cos.atCosmos || !!this.manager.mergerActive;
+    this.mergerBtn.hidden = !cos.atCosmos || !this.manager.toggleMerger; // absent on the legacy path
+
+    this.mergerBtn.classList.toggle('active', !!this.manager.mergerActive);
     if (cos.atCosmos && cos.forming) {
       this.era.textContent = 'COSMIC TIME';
       this.stardate.textContent = `${cos.ageGyr.toFixed(1)} Gyr`;

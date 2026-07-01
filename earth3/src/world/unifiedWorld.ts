@@ -54,6 +54,7 @@ import { StarSystemRegime } from '../regimes/starSystem';
 import { SurfaceRegime } from '../regimes/surface';
 import { CosmicWeb } from './cosmicWeb';
 import { StarCatalog } from './starCatalog';
+import { GalaxyMerger } from './galaxyMerger';
 
 const ORIGIN = new Vector3(0, 0, 0);
 const KPC_AU = AU_PER_PC * 1e3; // AU per kiloparsec
@@ -244,6 +245,11 @@ export class UnifiedWorld implements WorldFacade {
   // magnitude and re-projectable from any observer. Loaded async (appears when ready).
   private readonly starCatalog = new StarCatalog();
 
+  // Layer 3 — the Milky Way × Andromeda merger (a live restricted N-body sim), shown
+  // as a self-contained Cosmos-band overlay when toggled.
+  private readonly merger = new GalaxyMerger();
+  private mergerMode = false;
+
   // f64 orbit camera rig (yaw/pitch/log-distance) around a movable focus point
   private yaw = 0.6;
   private pitch = 0.5;
@@ -349,6 +355,10 @@ export class UnifiedWorld implements WorldFacade {
     // the real naked-eye sky — loads async, then appears (observer defaults to Earth)
     scene.add(this.starCatalog.group);
     void this.starCatalog.load();
+
+    // the galaxy-merger overlay (hidden until toggled)
+    this.merger.group.visible = false;
+    scene.add(this.merger.group);
 
     // the city band — a child of the Earth group (so it rides Earth's position/scale),
     // a small patch on the globe's pole. Scope its lights to CITY_LAYER and put its
@@ -456,6 +466,59 @@ export class UnifiedWorld implements WorldFacade {
     }
   }
 
+  /** drive the merger overlay: advance the sim, hide the normal scene, frame the collision */
+  private updateMerger(realDt: number): void {
+    // advance the merger at ~0.55 Gyr/s, respecting pause, and stop once fully merged
+    if (!this.clock.paused && this.merger.timeGyr < 8) this.merger.step(realDt * 0.55);
+
+    // everything else is hidden — the merger owns the view
+    this.galaxy.group.visible = false;
+    this.cosmicWeb.group.visible = false;
+    this.starCatalog.group.visible = false;
+    this.starSystem.object3d.visible = false;
+    this.earth.object3d.visible = false;
+    this.surface.object3d.visible = false;
+    for (const b of this.bodies) { b.dot.visible = false; b.label.visible = false; }
+    for (const ring of this.rings) { ring.line.visible = false; ring.label.visible = false; }
+    if (this.orbitLine) this.orbitLine.visible = false;
+    if (this.hoverLabel) this.hoverLabel.visible = false;
+    this.merger.group.visible = true;
+
+    // orbit the merger (centred on the origin) with the normal yaw/pitch/log rig
+    this.logDist += (this.targetLog - this.logDist) * Math.min(1, realDt * 7);
+    const dist = 10 ** this.logDist;
+    const cp = Math.cos(this.pitch);
+    this.fo.camWorld.set(cp * Math.sin(this.yaw) * dist, Math.sin(this.pitch) * dist, cp * Math.cos(this.yaw) * dist);
+    this.merger.group.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
+
+    this.camera.position.set(0, 0, 0);
+    this.camera.lookAt(this.fo.rel(ORIGIN, this.tmp));
+    this.camera.fov = 55;
+    this.camera.near = Math.max(dist * 1e-4, 1e-6);
+    this.camera.far = Math.max(dist * 1e3, 1.5e10);
+    this.camera.updateProjectionMatrix();
+  }
+
+  /** toggle the Milky Way × Andromeda merger overlay (Layer 3) */
+  toggleMerger(): void {
+    this.mergerMode = !this.mergerMode;
+    if (this.mergerMode) {
+      this.exitObserver();
+      this.merger.reset();
+      this.focusSun();
+      this.targetLog = Math.log10(this.merger.frameAu);
+      this.logDist = this.targetLog; // snap so the collision is framed immediately
+    } else {
+      this.merger.group.visible = false;
+      this.galaxy.group.visible = true; // the normal update never re-shows this
+    }
+    this.onChange?.();
+  }
+
+  get mergerActive(): boolean {
+    return this.mergerMode;
+  }
+
   /** label density from the bottom-left slider (0 = hover-only "explorer" mode). */
   setMaxLabels(n: number): void {
     this.maxLabels = Math.max(0, n);
@@ -530,6 +593,9 @@ export class UnifiedWorld implements WorldFacade {
     // comets fly + home + strike every frame regardless of zoom band (the threat
     // doesn't pause when you look away). Impacts fan out on the bus to the Earth band.
     this.comets.step(this.clock);
+
+    // Layer 3: the merger overlay owns the whole view when active
+    if (this.mergerMode) { this.updateMerger(realDt); return; }
 
     this.logDist += (this.targetLog - this.logDist) * Math.min(1, realDt * 7); // smooth zoom
     this.logDist = Math.max(this.minLog, Math.min(this.MAX_LOG, this.logDist));
@@ -802,6 +868,7 @@ export class UnifiedWorld implements WorldFacade {
   };
 
   get active(): { readonly label: string } {
+    if (this.mergerMode) return { label: 'Andromeda Merger' };
     if (this.observerGet) return { label: `◉ from ${this.observerLabel}` };
     const id = this.currentBandId();
     if (id === 'starsystem') return { label: this.activeStarName ?? 'Star System' };
@@ -901,6 +968,8 @@ export class UnifiedWorld implements WorldFacade {
   }
 
   cosmicInfo(): CosmicInfo {
+    // during the merger, drive the cosmic-time readout with the merger clock (0 → ~6 Gyr)
+    if (this.mergerMode) return { atCosmos: true, forming: true, ageGyr: this.merger.timeGyr };
     return { atCosmos: this.currentBandId() === 'universe', forming: this.cosmicWeb.isForming, ageGyr: this.cosmicWeb.cosmicAgeGyr };
   }
 

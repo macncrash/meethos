@@ -34,6 +34,9 @@ export interface WorldFacade {
   pickTargets(): FocusTarget[];
   cosmicInfo(): CosmicInfo;
   bigBang(): void;
+  /** Layer 3 merger overlay (UnifiedWorld only; absent on the legacy path). */
+  toggleMerger?(): void;
+  readonly mergerActive?: boolean;
 
   // comet / defense
   launchComet(): void;
