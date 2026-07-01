@@ -62,6 +62,7 @@ const EARTH_DATA = PLANETS[EARTH_IDX]!;
 const EARTH_GLOBE_SHOW = 0.03; // AU — within this camera distance, the true-scale globe replaces the dot
 const STAR_SYSTEM_ENTER = 800; // AU — fly this close to a named star and its system materializes
 const COSMIC_WEB_SHOW = 2e10; // AU — beyond this zoom-out the galaxy is one node in the cosmic web
+const OBSERVER_SOLAR_AU = 2000; // AU — within this the Sun/planets show as bodies (kept in sync with starCatalog)
 // the city band: the 72-unit SimCity tile sits in its own LOCAL sub-frame as a patch
 // on the globe's pole (scaled so block geometry stays f32-clean, NOT raw AU vertices).
 const CITY_TILE = 72; // SurfaceRegime's tile width in its local units
@@ -256,6 +257,14 @@ export class UnifiedWorld implements WorldFacade {
   private readonly focusWorld = new Vector3();
   private focusGet: (() => Vector3) | null = null;
 
+  // observer mode ("stand here, look out"): when observerGet is set, the camera sits AT
+  // that world point and free-looks (yaw/pitch = look direction, wheel = fov), and the
+  // star catalog re-projects apparent magnitudes from there. null = normal orbit mode.
+  private observerGet: (() => Vector3) | null = null;
+  private observerLabel = '';
+  private readonly observerWorld = new Vector3();
+  private fov = 55;
+
   // screen-space label declutter: each label sprite with a static priority; every
   // frame the visible ones are projected and lower-priority labels that collide with
   // a higher-priority one are hidden (re-evaluated each frame, so it never sticks).
@@ -378,7 +387,11 @@ export class UnifiedWorld implements WorldFacade {
     });
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
-      this.targetLog = Math.max(this.minLog, Math.min(this.MAX_LOG, this.targetLog + Math.sign(e.deltaY) * 0.18));
+      if (this.observerGet) {
+        this.fov = Math.max(6, Math.min(75, this.fov + Math.sign(e.deltaY) * 4)); // zoom the sky
+      } else {
+        this.targetLog = Math.max(this.minLog, Math.min(this.MAX_LOG, this.targetLog + Math.sign(e.deltaY) * 0.18));
+      }
     }, { passive: false });
 
     this.buildPickables();
@@ -464,24 +477,32 @@ export class UnifiedWorld implements WorldFacade {
     const seconds = this.clock.seconds;
     for (let i = 0; i < PLANETS.length; i++) planetPosition(PLANETS[i]!, seconds, this.bodies[i + 1]!.world);
 
-    // the camera orbits + looks at the focus point (default the Sun at the origin)
-    if (this.focusGet) this.focusWorld.copy(this.focusGet());
+    const observer = this.observerGet !== null;
     const dist = 10 ** this.logDist;
     const cp = Math.cos(this.pitch);
-    this.fo.camWorld.set(
-      this.focusWorld.x + cp * Math.sin(this.yaw) * dist,
-      this.focusWorld.y + Math.sin(this.pitch) * dist,
-      this.focusWorld.z + cp * Math.cos(this.yaw) * dist,
-    );
+    if (observer) {
+      // camera sits AT the observer; re-project the sky's apparent magnitudes from here
+      this.observerWorld.copy(this.observerGet!());
+      this.fo.camWorld.copy(this.observerWorld);
+      this.starCatalog.setObserver(this.observerWorld);
+    } else {
+      // the camera orbits + looks at the focus point (default the Sun at the origin)
+      if (this.focusGet) this.focusWorld.copy(this.focusGet());
+      this.fo.camWorld.set(
+        this.focusWorld.x + cp * Math.sin(this.yaw) * dist,
+        this.focusWorld.y + Math.sin(this.pitch) * dist,
+        this.focusWorld.z + cp * Math.cos(this.yaw) * dist,
+      );
+    }
 
     // the galaxy cloud + comet field ride floating origin by translating their groups
     this.galaxy.group.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
     this.cometGroup.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
 
     // the cosmic web: Big-Bang formation runs whenever active; shown + rebased only
-    // at the Cosmos band (zoomed out past the galaxy).
+    // at the Cosmos band (zoomed out past the galaxy) — never in observer mode.
     this.cosmicWeb.step(realDt);
-    const showCosmos = dist > COSMIC_WEB_SHOW;
+    const showCosmos = !observer && dist > COSMIC_WEB_SHOW;
     this.cosmicWeb.group.visible = showCosmos;
     if (showCosmos) this.cosmicWeb.group.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
 
@@ -543,7 +564,7 @@ export class UnifiedWorld implements WorldFacade {
       const d = sb.body.world.distanceTo(this.fo.camWorld);
       if (d < nearStarD) { nearStarD = d; nearStar = sb; }
     }
-    if (nearStar && nearStarD < STAR_SYSTEM_ENTER) {
+    if (!observer && nearStar && nearStarD < STAR_SYSTEM_ENTER) {
       if (nearStar.name !== this.activeStarName) {
         this.activeStarName = nearStar.name;
         this.starSystem.configure(seedFromName(nearStar.name), nearStar.name);
@@ -558,6 +579,25 @@ export class UnifiedWorld implements WorldFacade {
       this.activeStarName = null;
     }
 
+    // observer mode: the sky is the star catalog + galaxy; the game's glow-floor markers
+    // and rings are hidden, except the Sun + planets stay visible while you're inside the
+    // solar system (so Earth is a dot from Mars, but invisible from Alpha Centauri).
+    if (observer) {
+      const inSolar = this.fo.camWorld.length() < OBSERVER_SOLAR_AU;
+      for (const b of this.bodies) {
+        const local = b.kind === 'sun' || b.kind === 'planet';
+        const atCamera = b.world.distanceToSquared(this.fo.camWorld) < 1e-6; // the body you're standing on
+        const vis = local && inSolar && !atCamera;
+        b.dot.visible = vis;
+        b.label.visible = vis;
+      }
+      for (const ring of this.rings) { ring.line.visible = false; ring.label.visible = false; }
+      // the sky is the content when standing on a body — never the globe/city (the camera
+      // would otherwise sit inside the true-scale Earth mesh when viewing from Earth).
+      this.earth.object3d.visible = false;
+      this.surface.object3d.visible = false;
+    }
+
     // notify the HUD when the band changes so it rebuilds the breadcrumb/era
     const band = this.currentBandId();
     if (band !== this.lastBandId) {
@@ -566,9 +606,19 @@ export class UnifiedWorld implements WorldFacade {
     }
 
     this.camera.position.set(0, 0, 0);
-    this.camera.lookAt(this.fo.rel(this.focusWorld, this.tmp));
-    this.camera.near = Math.max(dist * 1e-4, 1e-6);
-    this.camera.far = Math.max(dist * 1e3, 1.5e10);
+    if (observer) {
+      // free-look: yaw/pitch is the LOOK direction. Negated to match orbit mode's look
+      // vector (focus − camWorld) so vertical drag feels the same across a 'v' toggle.
+      this.camera.lookAt(-cp * Math.sin(this.yaw), -Math.sin(this.pitch), -cp * Math.cos(this.yaw));
+      this.camera.fov = this.fov;
+      this.camera.near = 1e-3;
+      this.camera.far = 1e14;
+    } else {
+      this.camera.lookAt(this.fo.rel(this.focusWorld, this.tmp));
+      this.camera.fov = 55;
+      this.camera.near = Math.max(dist * 1e-4, 1e-6);
+      this.camera.far = Math.max(dist * 1e3, 1.5e10);
+    }
     this.camera.updateProjectionMatrix();
 
     this.declutterLabels(); // hide overlapping labels now the camera is final
@@ -584,6 +634,7 @@ export class UnifiedWorld implements WorldFacade {
 
   // ---- comet / defense facade (WorldFacade — consumed by the HUD + DefenseGame) ----
   launchComet(): void {
+    this.exitObserver(); // return to orbit so the incoming comet is viewable + deflectable
     this.comets.launch();
   }
 
@@ -593,6 +644,7 @@ export class UnifiedWorld implements WorldFacade {
 
   /** frame the solar system where the comets are (a zoom, not a regime transition) */
   frameForDefense(): void {
+    this.exitObserver(); // the defense game plays in orbit mode
     this.focusSun();
     this.targetLog = Math.log10(6); // ~6 AU — Earth's orbit + inbound comets in view
   }
@@ -679,6 +731,7 @@ export class UnifiedWorld implements WorldFacade {
   };
 
   get active(): { readonly label: string } {
+    if (this.observerGet) return { label: `◉ from ${this.observerLabel}` };
     const id = this.currentBandId();
     if (id === 'starsystem') return { label: this.activeStarName ?? 'Star System' };
     return { label: UnifiedWorld.BAND_LABEL[id] ?? 'Cosmos' };
@@ -704,6 +757,7 @@ export class UnifiedWorld implements WorldFacade {
 
   /** fly to a named band (sets the smooth-zoom target + focus — no cross-fade) */
   goTo(id: string): void {
+    this.exitObserver(); // navigation drives orbit mode, not the fixed observer camera
     switch (id) {
       case 'universe': this.focusSun(); this.targetLog = this.MAX_LOG; break;
       case 'galaxy': this.focusSun(); this.targetLog = Math.log10(7e8); break;
@@ -812,5 +866,49 @@ export class UnifiedWorld implements WorldFacade {
       this.cityFocusTmp.y += EARTH_RADIUS_AU; // the pole patch, one Earth-radius up
       return this.cityFocusTmp;
     }, CITY_RADIUS_AU);
+  }
+
+  // ---- observer mode: "stand here, look out" ----
+
+  /** enter observer mode at a moving world point (a body/star). Free-look with drag,
+   *  zoom the FOV with the wheel; the sky's apparent magnitudes re-project from here. */
+  viewFrom(get: () => Vector3, label = 'here'): void {
+    this.observerGet = get;
+    this.observerLabel = label;
+    this.fov = 55;
+    this.onChange?.();
+  }
+
+  /** view the sky from the currently focused body (the 'v' key) */
+  viewFromFocus(): void {
+    const t = this.focusTarget;
+    this.viewFrom(() => t.position(this.focusGetTmp), t.label);
+  }
+
+  /** leave observer mode, back to orbit; reset the sky to the from-Earth catalogue. */
+  exitObserver(): void {
+    if (!this.observerGet) return;
+    this.observerGet = null;
+    this.starCatalog.setObserver(ORIGIN);
+    this.onChange?.();
+  }
+
+  get isObserving(): boolean {
+    return this.observerGet !== null;
+  }
+
+  /** view the sky from Earth / Mars / a named star (for verification + the HUD) */
+  viewFromEarth(): void {
+    this.viewFrom(() => this.earthBody.world, 'Earth');
+  }
+
+  viewFromMars(): void {
+    const mars = this.bodies[1 + PLANETS.findIndex((p) => p.id === 'mars')];
+    if (mars) this.viewFrom(() => mars.world, 'Mars');
+  }
+
+  viewFromStar(name: string): void {
+    const sb = this.starBodies.find((x) => x.name === name);
+    if (sb) this.viewFrom(() => sb.body.world, name);
   }
 }

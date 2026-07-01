@@ -66,10 +66,15 @@ const game = new DefenseGame(world, bus, simClock);
 const hud = new Hud(simClock, world, bus, game);
 world.onChange = () => hud.rebuild();
 
-// keyboard: 'c' launches a comet at Earth, 'd' deflects an incoming one
+// keyboard: 'c' launches a comet at Earth, 'd' deflects an incoming one, 'v' toggles
+// observer mode (stand on the focused body and look out at the real sky from there)
 window.addEventListener('keydown', (e) => {
   if (e.key === 'c' || e.key === 'C') hud.fireComet();
   else if (e.key === 'd' || e.key === 'D') hud.deflect();
+  else if ((e.key === 'v' || e.key === 'V') && unified) {
+    if (unified.isObserving) unified.exitObserver();
+    else unified.viewFromFocus();
+  }
 });
 
 // ---- pointer picking (click = focus, double-click = dive) ----

@@ -23,6 +23,9 @@ import starsUrl from '../data/stars.bin?url';
 
 const STRIDE = 6; // per star: dirX, dirY, dirZ, distPc, absmag, ci
 const MAG_LIMIT = 6.5; // faintest naked-eye magnitude in the catalog
+/** within this observer distance from the Sun, the Sun renders as the real body (its
+ *  catalog point is suppressed). Kept in sync with UnifiedWorld's OBSERVER_SOLAR_AU. */
+const SOLAR_SYSTEM_AU = 2000;
 
 /** B–V colour index → effective temperature (Ballesteros 2012). */
 function tempFromBV(ci: number): number {
@@ -42,6 +45,9 @@ function starfieldMaterial(map: Texture): ShaderMaterial {
       uniform float uMaxPx;
       void main() {
         vColor = acolor;
+        // cull anything fainter than naked-eye (incl. the suppressed Sun at amag=99, and
+        // stars that drop below the limit when re-projected from a distant observer)
+        if (amag > ${(MAG_LIMIT + 0.5).toFixed(1)}) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
         float b = clamp((${MAG_LIMIT.toFixed(1)} - amag) / 8.0, 0.0, 1.0); // 0 faint … 1 brightest
         vBright = b;
         gl_PointSize = uMinPx + b * b * (uMaxPx - uMinPx);
@@ -74,16 +80,21 @@ export class StarCatalog {
   private absmag?: Float32Array;
   private amagAttr?: BufferAttribute;
   private mat?: ShaderMaterial;
+  /** index of the Sun in the catalog — it's the origin star, so from other vantages
+   *  it becomes an ordinary point (mag ~0.4 from Alpha Cen), and is suppressed when
+   *  the observer is inside the solar system (the real Sun body handles near views). */
+  private sunIndex = -1;
   /** the current observer position in AU (default: the origin = Earth/Sun) */
   private readonly observer = new Vector3();
 
   async load(): Promise<void> {
     const raw = new Float32Array(await (await fetch(starsUrl)).arrayBuffer());
     const n = Math.floor(raw.length / STRIDE);
-    const pos = new Float32Array(n * 3);
-    const col = new Float32Array(n * 3);
-    const amag = new Float32Array(n);
-    const absmag = new Float32Array(n);
+    const total = n + 1; // + the Sun
+    const pos = new Float32Array(total * 3);
+    const col = new Float32Array(total * 3);
+    const amag = new Float32Array(total);
+    const absmag = new Float32Array(total);
     const c = new Color();
     for (let i = 0; i < n; i++) {
       const o = i * STRIDE;
@@ -99,6 +110,13 @@ export class StarCatalog {
       col[i * 3 + 2] = c.b;
       amag[i] = absmag[i]! + 5 * Math.log10(Math.max(1e-6, dpc) / 10); // apparent mag from Earth
     }
+    // the Sun: at the origin, absolute mag +4.83 (V), G2 colour. Invisible from Earth
+    // (the real body renders); becomes a star once the observer leaves the solar system.
+    this.sunIndex = n;
+    absmag[n] = 4.83;
+    blackbodyColor(5772, c);
+    col[n * 3] = c.r; col[n * 3 + 1] = c.g; col[n * 3 + 2] = c.b;
+    amag[n] = 99; // hidden from Earth/origin
     this.worldPos = pos;
     this.absmag = absmag;
 
@@ -134,6 +152,10 @@ export class StarCatalog {
       const dpc = Math.max(1e-9, Math.sqrt(dx * dx + dy * dy + dz * dz) / AU_PER_PC);
       amag[i] = abs[i]! + 5 * Math.log10(dpc / 10);
     }
+    // suppress the Sun while the observer is inside the solar system; the real Sun body
+    // handles those views (matches UnifiedWorld's OBSERVER_SOLAR_AU so the Sun is never
+    // both a body dot and a catalog star). Its catalog point would be a blinding blob.
+    if (this.sunIndex >= 0 && world.length() < SOLAR_SYSTEM_AU) amag[this.sunIndex] = 99;
     this.amagAttr.needsUpdate = true;
   }
 }
