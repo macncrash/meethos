@@ -53,6 +53,7 @@ import type { DeflectResult, DefenseStats } from '../regimes/comets';
 import { StarSystemRegime } from '../regimes/starSystem';
 import { SurfaceRegime } from '../regimes/surface';
 import { CosmicWeb } from './cosmicWeb';
+import { StarCatalog } from './starCatalog';
 
 const ORIGIN = new Vector3(0, 0, 0);
 const KPC_AU = AU_PER_PC * 1e3; // AU per kiloparsec
@@ -238,6 +239,10 @@ export class UnifiedWorld implements WorldFacade {
   // Rides the floating origin like the galaxy; shown only when zoomed out past it.
   private readonly cosmicWeb = new CosmicWeb();
 
+  // the REAL naked-eye sky — ~8,900 HYG stars at true positions, rendered by apparent
+  // magnitude and re-projectable from any observer. Loaded async (appears when ready).
+  private readonly starCatalog = new StarCatalog();
+
   // f64 orbit camera rig (yaw/pitch/log-distance) around a movable focus point
   private yaw = 0.6;
   private pitch = 0.5;
@@ -322,6 +327,10 @@ export class UnifiedWorld implements WorldFacade {
     // the cosmic web — shown only at the Cosmos band, rides the floating origin
     this.cosmicWeb.group.visible = false;
     scene.add(this.cosmicWeb.group);
+
+    // the real naked-eye sky — loads async, then appears (observer defaults to Earth)
+    scene.add(this.starCatalog.group);
+    void this.starCatalog.load();
 
     // the city band — a child of the Earth group (so it rides Earth's position/scale),
     // a small patch on the globe's pole. Scope its lights to CITY_LAYER and put its
@@ -475,6 +484,11 @@ export class UnifiedWorld implements WorldFacade {
     const showCosmos = dist > COSMIC_WEB_SHOW;
     this.cosmicWeb.group.visible = showCosmos;
     if (showCosmos) this.cosmicWeb.group.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
+
+    // the real naked-eye sky rides the floating origin too; hide it at the Cosmos band
+    // (the cosmic web takes over and the local stars collapse to the origin).
+    this.starCatalog.group.visible = !showCosmos;
+    if (!showCosmos) this.starCatalog.group.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
 
     // the Earth band: place the true-scale globe at Earth's heliocentric AU position,
     // shown only when the camera is close enough that the globe is more than a glint.
