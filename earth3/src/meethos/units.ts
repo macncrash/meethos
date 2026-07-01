@@ -22,6 +22,14 @@ export const AU_PER_MPC = AU_PER_PC * 1e6;
 export const SUN_RADIUS_AU = 696_340e3 / AU_M; // ≈ 0.004652
 export const EARTH_RADIUS_AU = 6_371e3 / AU_M; // ≈ 0.0000426
 
+/** Coarse galactic "sector" address (5-ly cubes) for an AU position — the Sun (and
+ *  our whole solar system) is sector 0,0,0; neighbours get small integer coordinates. */
+export const SECTOR_LY = 5;
+export function sectorLabel(xAu: number, yAu: number, zAu: number): string {
+  const s = (v: number): number => Math.round(v / AU_PER_LY / SECTOR_LY);
+  return `${s(xAu)}, ${s(yAu)}, ${s(zAu)}`;
+}
+
 /** Adaptive human-readable distance, given a length in AU (the canonical unit). */
 export function formatDistance(au: number): string {
   const a = Math.abs(au);

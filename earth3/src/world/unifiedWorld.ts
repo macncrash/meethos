@@ -285,6 +285,7 @@ export class UnifiedWorld implements WorldFacade {
   /** all selectable major bodies (Sun, planets, stars, GC), positions in absolute AU */
   private readonly pickables: FocusTarget[] = [];
   private focusTarget!: FocusTarget; // the currently focused body (set in the constructor)
+  private selectedTarget: FocusTarget | null = null; // a clicked catalogue star (inspect w/o flying)
   private lastBandId = '';
   onChange?: () => void;
   private readonly focusGetTmp = new Vector3();
@@ -808,7 +809,18 @@ export class UnifiedWorld implements WorldFacade {
   }
 
   get focus(): FocusTarget {
-    return this.focusTarget;
+    return this.selectedTarget ?? this.focusTarget;
+  }
+
+  /** pick the nearest catalogue star at a screen point (NDC) — its rich card for the inspector */
+  pickStar(ndcX: number, ndcY: number): FocusTarget | null {
+    return this.starCatalog.pickTarget(ndcX, ndcY, this.camera, this.fo.camWorld);
+  }
+
+  /** select a catalogue star: show its card in the inspector without moving the camera */
+  select(target: FocusTarget | null): void {
+    this.selectedTarget = target;
+    this.onChange?.();
   }
 
   breadcrumb(): Breadcrumb[] {
@@ -841,6 +853,7 @@ export class UnifiedWorld implements WorldFacade {
 
   /** focus a body: orbit + look at it, and let the smooth-zoom keep the current dist */
   focusOn(target: FocusTarget): void {
+    this.selectedTarget = null; // focusing a body clears a catalogue-star selection
     this.focusTarget = target;
     this.setCameraFocus(() => target.position(this.focusGetTmp), target.radius);
     this.onChange?.();

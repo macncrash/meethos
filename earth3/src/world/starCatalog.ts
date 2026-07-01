@@ -16,9 +16,12 @@ import {
   Vector3,
   type Texture,
 } from 'three';
+import type { PerspectiveCamera } from 'three';
+import type { FocusTarget, InspectorInfo } from '../core/regime';
 import { blackbodyColor } from '../core/color';
 import { dotTexture } from '../render/sprites';
-import { AU_PER_PC } from '../meethos/units';
+import { AU_PER_PC, LY_PER_PC, sectorLabel } from '../meethos/units';
+import { STAR_NAMES } from '../data/starNames';
 import starsUrl from '../data/stars.bin?url';
 
 const STRIDE = 6; // per star: dirX, dirY, dirZ, distPc, absmag, ci
@@ -78,14 +81,18 @@ export class StarCatalog {
 
   private worldPos?: Float32Array; // absolute AU positions, 3 per star
   private absmag?: Float32Array;
+  private distPc?: Float32Array;
+  private ciArr?: Float32Array;
   private amagAttr?: BufferAttribute;
   private mat?: ShaderMaterial;
+  private readonly names = new Map<number, { name: string; con: string }>();
   /** index of the Sun in the catalog — it's the origin star, so from other vantages
    *  it becomes an ordinary point (mag ~0.4 from Alpha Cen), and is suppressed when
    *  the observer is inside the solar system (the real Sun body handles near views). */
   private sunIndex = -1;
   /** the current observer position in AU (default: the origin = Earth/Sun) */
   private readonly observer = new Vector3();
+  private readonly _p = new Vector3(); // scratch for screen-space picking
 
   async load(): Promise<void> {
     const raw = new Float32Array(await (await fetch(starsUrl)).arrayBuffer());
@@ -95,6 +102,8 @@ export class StarCatalog {
     const col = new Float32Array(total * 3);
     const amag = new Float32Array(total);
     const absmag = new Float32Array(total);
+    const distPc = new Float32Array(total);
+    const ciArr = new Float32Array(total);
     const c = new Color();
     for (let i = 0; i < n; i++) {
       const o = i * STRIDE;
@@ -104,12 +113,18 @@ export class StarCatalog {
       pos[i * 3 + 1] = raw[o + 1]! * distAu;
       pos[i * 3 + 2] = raw[o + 2]! * distAu;
       absmag[i] = raw[o + 4]!;
-      blackbodyColor(tempFromBV(raw[o + 5]!), c);
+      distPc[i] = dpc;
+      ciArr[i] = raw[o + 5]!;
+      blackbodyColor(tempFromBV(ciArr[i]!), c);
       col[i * 3] = c.r;
       col[i * 3 + 1] = c.g;
       col[i * 3 + 2] = c.b;
       amag[i] = absmag[i]! + 5 * Math.log10(Math.max(1e-6, dpc) / 10); // apparent mag from Earth
     }
+    ciArr[n] = 0.65; // the Sun (index n)
+    this.distPc = distPc;
+    this.ciArr = ciArr;
+    for (const [idx, name, con] of STAR_NAMES) this.names.set(idx, { name, con });
     // the Sun: at the origin, absolute mag +4.83 (V), G2 colour. Invisible from Earth
     // (the real body renders); becomes a star once the observer leaves the solar system.
     this.sunIndex = n;
@@ -158,4 +173,61 @@ export class StarCatalog {
     if (this.sunIndex >= 0 && world.length() < SOLAR_SYSTEM_AU) amag[this.sunIndex] = 99;
     this.amagAttr.needsUpdate = true;
   }
+
+  /** pick the nearest rendered catalogue star to a screen point (NDC), as a FocusTarget
+   *  whose info() is the star's catalogue card (sector, distance, class, magnitudes). */
+  pickTarget(ndcX: number, ndcY: number, camera: PerspectiveCamera, camWorld: Vector3): FocusTarget | null {
+    if (!this.worldPos || !this.amagAttr) return null;
+    const pos = this.worldPos;
+    const amag = this.amagAttr.array as Float32Array;
+    let best = -1;
+    let bestD = 0.02 * 0.02; // NDC pick radius²
+    for (let i = 0; i < amag.length; i++) {
+      if (amag[i]! > MAG_LIMIT + 0.5) continue; // not rendered (too faint / suppressed)
+      this._p.set(pos[i * 3]! - camWorld.x, pos[i * 3 + 1]! - camWorld.y, pos[i * 3 + 2]! - camWorld.z).project(camera);
+      if (this._p.z > 1) continue; // behind the camera
+      const dx = this._p.x - ndcX;
+      const dy = this._p.y - ndcY;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    if (best < 0) return null;
+    const idx = best;
+    return {
+      id: `hyg-${idx}`,
+      label: this.names.get(idx)?.name ?? 'Star',
+      radius: 0.25,
+      position: (out) => out.set(pos[idx * 3]!, pos[idx * 3 + 1]!, pos[idx * 3 + 2]!),
+      info: () => this.starCard(idx),
+    };
+  }
+
+  private starCard(i: number): InspectorInfo {
+    const named = this.names.get(i);
+    const dpc = this.distPc?.[i] ?? 0;
+    const app = (this.amagAttr!.array as Float32Array)[i]!;
+    const pos = this.worldPos!;
+    const rows: Array<[string, string]> = [
+      ['Sector', sectorLabel(pos[i * 3]!, pos[i * 3 + 1]!, pos[i * 3 + 2]!)],
+      ['Distance', `${(dpc * LY_PER_PC).toFixed(2)} ly · ${dpc.toFixed(2)} pc`],
+      ['Class', spectralClass(this.ciArr?.[i] ?? 0.6)],
+      ['App. mag', app.toFixed(2)],
+      ['Abs. mag', (this.absmag?.[i] ?? 0).toFixed(2)],
+    ];
+    if (named?.con) rows.push(['Constellation', named.con]);
+    return {
+      title: named?.name ?? 'Uncatalogued star',
+      rows,
+      blurb: named
+        ? 'A named naked-eye star from the HYG catalogue.'
+        : 'A naked-eye star from the HYG catalogue — one of ~8,900 within reach.',
+    };
+  }
+}
+
+/** rough MK spectral class + effective temperature from a B–V colour index. */
+function spectralClass(ci: number): string {
+  const t = tempFromBV(ci);
+  const cls = t > 28000 ? 'O' : t > 10500 ? 'B' : t > 7300 ? 'A' : t > 5900 ? 'F' : t > 5200 ? 'G' : t > 3800 ? 'K' : 'M';
+  return `${cls} · ${Math.round(t).toLocaleString()} K`;
 }

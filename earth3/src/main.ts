@@ -116,7 +116,9 @@ canvas.addEventListener('click', (e) => {
   raycaster.setFromCamera(pointer, camera);
   if (hud.tryDeflectAt(raycaster.ray)) return; // clicked a comet — shoot it down
   const target = unified ? unified.pick(raycaster.ray) : pick(e);
-  if (target) world.focusOn(target);
+  if (target) { world.focusOn(target); return; }
+  // no body under the pointer — try the star catalogue (inspect its card, don't fly there)
+  if (unified) unified.select(unified.pickStar(pointer.x, pointer.y));
 });
 
 canvas.addEventListener('dblclick', (e) => {
