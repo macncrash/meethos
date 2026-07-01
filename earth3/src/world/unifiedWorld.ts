@@ -42,7 +42,7 @@ import { blackbodyColor } from '../core/color';
 import { mulberry32, gaussian } from '../core/rng';
 import { dotTexture, glowTexture } from '../render/sprites';
 import { makeLabel } from '../render/label';
-import { planetPosition } from '../regimes/data/kepler';
+import { planetPosition, orbitPath } from '../regimes/data/kepler';
 import { PLANETS, SUN } from '../regimes/data/planets';
 import { AU_M, AU_PER_LY, AU_PER_PC, EARTH_RADIUS_AU, SUN_RADIUS_AU } from '../meethos/units';
 import { eclipticDirFromRaDec, galacticBasis } from '../meethos/frames';
@@ -277,6 +277,9 @@ export class UnifiedWorld implements WorldFacade {
   /** the object the pointer is hovering — its name is always shown (hoverLabel) */
   private hoveredTarget: FocusTarget | null = null;
   private hoverLabel: Sprite | null = null;
+  /** highlighted orbit ellipse for the hovered/selected planet (great in pause) */
+  private orbitLine: LineLoop | null = null;
+  private orbitBodyId: string | null = null;
 
   // ---- WorldFacade state (the band/inspector/picking surface the HUD talks to) ----
   /** all selectable major bodies (Sun, planets, stars, GC), positions in absolute AU */
@@ -475,6 +478,34 @@ export class UnifiedWorld implements WorldFacade {
     }
   }
 
+  /** highlight the orbit ellipse of the hovered planet (else the focused planet) — a
+   *  projected path arc, drawn on top so it reads even in pause. Solar planets only
+   *  (all in our sector); rebuilt only when the planet changes. */
+  private updateOrbitHighlight(): void {
+    const hovered = this.hoveredTarget ? PLANETS.find((p) => p.id === this.hoveredTarget!.id) : undefined;
+    const focused = PLANETS.find((p) => p.id === this.focusTarget.id);
+    const planet = hovered ?? focused;
+    if (!planet) {
+      this.orbitBodyId = null;
+      if (this.orbitLine) this.orbitLine.visible = false;
+      return;
+    }
+    if (this.orbitBodyId !== planet.id) {
+      this.orbitBodyId = planet.id;
+      if (this.orbitLine) {
+        this.scene.remove(this.orbitLine);
+        this.orbitLine.geometry.dispose();
+        (this.orbitLine.material as LineBasicMaterial).dispose();
+      }
+      const geom = new BufferGeometry().setFromPoints(orbitPath(planet, 256));
+      this.orbitLine = new LineLoop(geom, new LineBasicMaterial({ color: 0x6fd3ff, transparent: true, opacity: 0.75, depthTest: false }));
+      this.orbitLine.renderOrder = 3;
+      this.scene.add(this.orbitLine);
+    }
+    this.fo.place(this.orbitLine!, ORIGIN); // heliocentric ellipse, rebased to the camera
+    this.orbitLine!.visible = true;
+  }
+
   private dot(size: number, color: Color): Sprite {
     const s = new Sprite(new SpriteMaterial({ map: dotTexture(), color, sizeAttenuation: false, depthTest: false, transparent: true }));
     s.scale.set(size, size, 1);
@@ -655,6 +686,10 @@ export class UnifiedWorld implements WorldFacade {
       this.fo.place(this.hoverLabel, this.hoveredTarget.position(this.tmp));
       this.hoverLabel.visible = true;
     }
+
+    // orbit-path highlight (not in observer mode — you're looking at the sky there)
+    if (observer) { if (this.orbitLine) this.orbitLine.visible = false; }
+    else this.updateOrbitHighlight();
 
     this.declutterLabels(); // hide overlapping labels now the camera is final
   }
