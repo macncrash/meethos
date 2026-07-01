@@ -271,6 +271,19 @@ export class UnifiedWorld implements WorldFacade {
   /** notify the route panel when waypoints/speed/fly state change */
   onRouteChange?: () => void;
 
+  // ---- fly-to: an animated go-to that glides the orbit camera to a destination,
+  // pulling back to frame the whole hop mid-flight (a "Powers of Ten" arc) so a jump
+  // across any scale gap reads as travel, not a teleport. Distinct from the route fly.
+  private flyToActive = false;
+  private flyToT = 0; // 0 → 1 over the flight
+  private flyToDur = 1.6; // seconds, scaled per hop
+  private flyToTarget: FocusTarget | null = null;
+  private readonly flyToFrom = new Vector3(); // look-at point at flight start
+  private readonly flyToTo = new Vector3(); // destination look-at (re-sampled each frame)
+  private flyToLogStart = 0;
+  private flyToLogEnd = 0;
+  private flyToLogPeak = 0; // mid-flight pull-back log-distance
+
   // f64 orbit camera rig (yaw/pitch/log-distance) around a movable focus point
   private yaw = 0.6;
   private pitch = 0.5;
@@ -431,6 +444,7 @@ export class UnifiedWorld implements WorldFacade {
       if (this.observerGet) {
         this.fov = Math.max(6, Math.min(75, this.fov + Math.sign(e.deltaY) * 4)); // zoom the sky
       } else {
+        this.cancelFlyTo(); // grabbing the zoom wheel ends a flight (hands off to the destination)
         this.targetLog = Math.max(this.minLog, Math.min(this.MAX_LOG, this.targetLog + Math.sign(e.deltaY) * 0.18));
       }
     }, { passive: false });
@@ -745,8 +759,12 @@ export class UnifiedWorld implements WorldFacade {
     // Layer 4: advance the route fly-through (drives the observer camera via flyPos)
     if (this.flyActive) this.advanceFly(realDt);
 
-    this.logDist += (this.targetLog - this.logDist) * Math.min(1, realDt * 7); // smooth zoom
-    this.logDist = Math.max(this.minLog, Math.min(this.MAX_LOG, this.logDist));
+    if (this.flyToActive) {
+      this.advanceFlyTo(realDt); // drives logDist + focusWorld along the flight arc
+    } else {
+      this.logDist += (this.targetLog - this.logDist) * Math.min(1, realDt * 7); // smooth zoom
+      this.logDist = Math.max(this.minLog, Math.min(this.MAX_LOG, this.logDist));
+    }
 
     // re-place the planets along their true orbits at the sim clock's absolute time
     const seconds = this.clock.seconds;
@@ -913,6 +931,8 @@ export class UnifiedWorld implements WorldFacade {
   /** Orbit + look at a moving world point (e.g. a planet). `radius` sets how close
    *  the camera may approach. Pass null to return to the Sun at the origin. */
   private setCameraFocus(get: (() => Vector3) | null, radius: number): void {
+    this.flyToActive = false; // any explicit focus change (click, nav, dive) cancels a flight
+    this.flyToTarget = null;
     this.focusGet = get;
     this.minLog = Math.log10(Math.max(radius * 2.5, 1e-6));
     if (!get) this.focusWorld.set(0, 0, 0);
@@ -1101,6 +1121,9 @@ export class UnifiedWorld implements WorldFacade {
    *  sensible distance. `observe` instead drops into observer mode standing there,
    *  so the real sky re-projects from that vantage (Earth from Mars, M31 from home). */
   goToTarget(target: FocusTarget, observe = false): void {
+    // if we're leaving observer mode, remember where we were STANDING so the flight
+    // starts from that vantage — else frame 1 pops to the stale pre-observer orbit focus.
+    const fromObserver = this.observerGet ? this.observerGet().clone() : null;
     this.exitObserver();
     this.mergerMode = false;
     this.flyActive = false;
@@ -1109,9 +1132,97 @@ export class UnifiedWorld implements WorldFacade {
       this.viewFrom(() => target.position(this.goToTmp), target.label);
       return;
     }
-    this.focusOn(target);
-    const frame = target.id === 'sun' ? Math.log10(30) : Math.log10(target.radius * 60);
-    this.targetLog = Math.max(this.minLog, Math.min(this.MAX_LOG, frame));
+    this.startFlyTo(target, fromObserver);
+  }
+
+  /** the framing distance a go-to settles at, in log10(AU) */
+  private frameLog(target: FocusTarget): number {
+    const end = target.id === 'sun' ? Math.log10(30) : Math.log10(target.radius * 60);
+    const floor = Math.log10(Math.max(target.radius * 2.5, 1e-6));
+    return Math.max(floor, Math.min(this.MAX_LOG, end));
+  }
+
+  /** Begin an animated flight to `target`: capture the current look-at + zoom, sample
+   *  the destination, and set a mid-flight pull-back peak that frames the whole hop. */
+  private startFlyTo(target: FocusTarget, from: Vector3 | null = null): void {
+    // start point A: the observer vantage if we just left observer mode (the camera was
+    // AT that point, close in), else the current orbit look-at + zoom.
+    if (from) {
+      this.flyToFrom.copy(from);
+      this.flyToLogStart = Math.log10(0.02); // begin right beside where we stood
+    } else {
+      this.flyToFrom.copy(this.focusWorld);
+      this.flyToLogStart = this.logDist;
+    }
+    target.position(this.flyToTo);
+    this.flyToLogEnd = this.frameLog(target);
+    // pull back far enough that both endpoints are in view at mid-flight, but never
+    // tighter than where we start or end (a near hop barely lifts; a cosmic one soars).
+    const sep = this.flyToFrom.distanceTo(this.flyToTo);
+    const logSep = sep > 0 ? Math.min(this.MAX_LOG, Math.log10(sep)) : this.flyToLogStart;
+    this.flyToLogPeak = Math.max(this.flyToLogStart, this.flyToLogEnd, logSep);
+    const lift = this.flyToLogPeak - Math.max(this.flyToLogStart, this.flyToLogEnd);
+    this.flyToDur = Math.min(3.4, 1.1 + lift * 0.28); // snappy for near hops, grand for cosmic
+    this.flyToT = 0;
+    this.flyToTarget = target;
+    this.flyToActive = true;
+    // reflect the destination in the inspector/breadcrumb now, but drive focusWorld
+    // ourselves during the flight (no focusGet, so it isn't snapped to the target).
+    this.focusTarget = target;
+    this.focusGet = null;
+    this.minLog = Math.log10(Math.max(target.radius * 2.5, 1e-6));
+    this.onChange?.();
+  }
+
+  /** advance the flight one frame: glide the look-at A→B and arc the zoom out then in.
+   *  The zoom runs as two smoothstep legs (start→peak, then peak→end) so it is bounded
+   *  by the peak — a single sine hump on an asymmetric base can overshoot it. */
+  private advanceFlyTo(realDt: number): void {
+    const target = this.flyToTarget!;
+    this.flyToT = Math.min(1, this.flyToT + realDt / this.flyToDur);
+    const u = this.flyToT;
+    const s = u * u * (3 - 2 * u); // eased look-at glide A→B
+    target.position(this.flyToTo); // re-sample — the destination may be orbiting
+    this.focusWorld.lerpVectors(this.flyToFrom, this.flyToTo, s);
+    const h = u < 0.5 ? u / 0.5 : (u - 0.5) / 0.5; // 0→1 within the current leg
+    const k = h * h * (3 - 2 * h);
+    this.logDist = u < 0.5
+      ? this.flyToLogStart + (this.flyToLogPeak - this.flyToLogStart) * k
+      : this.flyToLogPeak + (this.flyToLogEnd - this.flyToLogPeak) * k;
+    if (u >= 1) this.endFlyTo();
+  }
+
+  /** land the flight: hand off to normal orbit focus tracking the destination. */
+  private endFlyTo(): void {
+    const target = this.flyToTarget!;
+    this.flyToActive = false;
+    this.flyToTarget = null;
+    this.setCameraFocus(() => target.position(this.focusGetTmp), target.radius);
+    this.logDist = this.targetLog = this.flyToLogEnd;
+    this.focusWorld.copy(target.position(this.focusGetTmp)); // no 1-frame pop before focusGet takes over
+  }
+
+  /** Abort a flight in progress WITHOUT snapping to the destination framing: hand orbit
+   *  tracking to the destination body (so we never freeze on a mid-air point) and hold
+   *  the current zoom. Used when the user grabs manual control (wheel) or enters observer
+   *  mode mid-flight — both would otherwise leave focusGet null and focusWorld stale. */
+  private cancelFlyTo(): void {
+    if (!this.flyToActive) return;
+    const target = this.flyToTarget;
+    this.flyToActive = false;
+    this.flyToTarget = null;
+    if (target) {
+      this.setCameraFocus(() => target.position(this.focusGetTmp), target.radius);
+      this.targetLog = this.logDist; // hold current zoom; don't revert to the pre-flight target
+    }
+  }
+
+  get flyingTo(): boolean {
+    return this.flyToActive;
+  }
+
+  get flyToProgress(): number {
+    return this.flyToT;
   }
 
   /** dive into a body = focus it and zoom in close (the unified analogue of descent) */
@@ -1213,6 +1324,7 @@ export class UnifiedWorld implements WorldFacade {
   /** enter observer mode at a moving world point (a body/star). Free-look with drag,
    *  zoom the FOV with the wheel; the sky's apparent magnitudes re-project from here. */
   viewFrom(get: () => Vector3, label = 'here'): void {
+    this.cancelFlyTo(); // observer supersedes a flight — but restore focusGet so exiting isn't stale
     this.observerGet = get;
     this.observerLabel = label;
     this.fov = 55;
