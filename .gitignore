@@ -7,6 +7,10 @@ dist-single/
 # single-file shareable build artifact (produced by `bun run build:single`)
 /Earth3.html
 
+# highlight-reel capture artifacts (produced by tools/reel)
+/highlight.gif
+/highlight.mp4
+
 # editor / OS
 .DS_Store
 .idea/

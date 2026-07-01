@@ -28,10 +28,13 @@ import { createBackdropStars } from './render/backdrop';
 // transition machinery is deleted in a follow-up.
 const LEGACY = new URLSearchParams(window.location.search).has('legacy');
 const UNIFIED = !LEGACY;
+// `?capture` keeps the drawing buffer readable so a scripted tour can grab frames off the
+// canvas for the shareable highlight reel (small perf cost, off by default).
+const CAPTURE = new URLSearchParams(window.location.search).has('capture');
 
 const canvas = document.getElementById('stage') as HTMLCanvasElement;
 
-const renderer = new WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
+const renderer = new WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true, preserveDrawingBuffer: CAPTURE });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = ACESFilmicToneMapping;
