@@ -73,6 +73,7 @@ world.onChange = () => hud.rebuild();
 // observer mode (stand on the focused body and look out at the real sky from there)
 window.addEventListener('keydown', (e) => {
   if (document.getElementById('search')?.hidden === false) return; // the search palette owns the keyboard while open
+  if (document.activeElement instanceof HTMLInputElement) return; // typing coordinates ≠ firing comets
   if (e.key === 'c' || e.key === 'C') hud.fireComet();
   else if (e.key === 'd' || e.key === 'D') hud.deflect();
   else if ((e.key === 'v' || e.key === 'V') && unified) {
@@ -228,6 +229,8 @@ function closeSearch(): void {
 function goSearch(e: SearchEntry, observe: boolean): void {
   if (e.constellationId) unified?.showConstellation(e.constellationId); // aim the sky at the figure
   else if (e.target) unified?.goToTarget(e.target, observe);
+  // a 92-minute orbit at 1 yr/s is strobing noise — riding a craft needs human-scale time
+  if (e.kind === 'sat' && !simClock.paused && simClock.rate > 3600) simClock.setRateIndex(0);
   closeSearch();
 }
 
@@ -246,6 +249,45 @@ window.addEventListener('keydown', (e) => {
   if (e.key === '/' || (e.key.toLowerCase() === 'k' && (e.metaKey || e.ctrlKey))) {
     e.preventDefault();
     openSearch();
+  }
+});
+
+// ---- "what is that?" — ground vantage + coordinate-aimed sky identification ----
+const skyBox = document.getElementById('skyid');
+const skyResult = document.getElementById('sky-result');
+const skyVal = (id: string): number => Number((document.getElementById(id) as HTMLInputElement | null)?.value ?? 0) || 0;
+const skyMode = (): 'altaz' | 'radec' =>
+  (document.querySelector('input[name="sky-mode"]:checked') as HTMLInputElement | null)?.value === 'radec' ? 'radec' : 'altaz';
+function skySpec(): { mode: 'altaz' | 'radec'; lat: number; lon: number; c1: number; c2: number } {
+  return { mode: skyMode(), lat: skyVal('sky-lat'), lon: skyVal('sky-lon'), c1: skyVal('sky-c1'), c2: skyVal('sky-c2') };
+}
+if (LEGACY) { const b = document.getElementById('skybtn'); if (b) b.hidden = true; }
+document.getElementById('skybtn')?.addEventListener('click', () => { if (skyBox) skyBox.hidden = !skyBox.hidden; });
+document.getElementById('sky-close')?.addEventListener('click', () => { if (skyBox) skyBox.hidden = true; });
+// the coordinate captions follow the mode (Alt/Az degrees ↔ RA hours / Dec degrees)
+document.querySelectorAll('input[name="sky-mode"]').forEach((r) => r.addEventListener('change', () => {
+  const radec = skyMode() === 'radec';
+  const c1 = document.getElementById('sky-c1-cap');
+  const c2 = document.getElementById('sky-c2-cap');
+  if (c1) c1.textContent = radec ? 'RA h' : 'Alt';
+  if (c2) c2.textContent = radec ? 'Dec' : 'Az';
+}));
+document.getElementById('sky-stand')?.addEventListener('click', () => {
+  if (!unified) return;
+  const s = skySpec();
+  unified.standAt(s.lat, s.lon);
+  if (skyResult) { skyResult.hidden = false; skyResult.innerHTML = `Standing at <b>${s.lat.toFixed(1)}°, ${s.lon.toFixed(1)}°</b> — drag to look around; run time and the sky wheels.`; }
+});
+document.getElementById('sky-aim')?.addEventListener('click', () => {
+  if (!unified) return;
+  const s = skySpec();
+  unified.standAt(s.lat, s.lon); // always (re)anchor — the panel's ground IS the vantage
+  const hit = unified.whatIsThat(unified.skyDir(s));
+  if (skyResult) {
+    skyResult.hidden = false;
+    skyResult.innerHTML = hit
+      ? `That is <b>${hit.label}</b> <span class="sky-sub">${hit.sub}</span>`
+      : 'Nothing bright there.';
   }
 });
 
@@ -281,7 +323,11 @@ canvas.addEventListener('click', (e) => {
     if (wp) unified.addWaypoint(wp);
     return;
   }
-  if (target) { world.focusOn(target); return; }
+  if (target) {
+    world.focusOn(target);
+    if (target.id.startsWith('sat-') && !simClock.paused && simClock.rate > 3600) simClock.setRateIndex(0);
+    return;
+  }
   // no body under the pointer — try the star catalogue (inspect its card, don't fly there)
   if (unified) unified.select(unified.pickStar(pointer.x, pointer.y));
 });

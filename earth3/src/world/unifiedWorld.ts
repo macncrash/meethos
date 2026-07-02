@@ -46,7 +46,7 @@ import { makeLabel } from '../render/label';
 import { planetPosition, orbitPath } from '../regimes/data/kepler';
 import { PLANETS, SUN } from '../regimes/data/planets';
 import { AU_M, AU_PER_LY, AU_PER_PC, EARTH_RADIUS_AU, SUN_RADIUS_AU } from '../meethos/units';
-import { eclipticDirFromRaDec, galacticBasis } from '../meethos/frames';
+import { eclipticDirFromRaDec, galacticBasis, groundDir, altazDir } from '../meethos/frames';
 import { FloatingOrigin } from '../meethos/floatingOrigin';
 import { EarthRegime } from '../regimes/earth';
 import { CometField } from '../regimes/comets';
@@ -334,7 +334,7 @@ export class UnifiedWorld implements WorldFacade {
   // a higher-priority one are hidden (re-evaluated each frame, so it never sticks).
   // `world` entries store an absolute-AU position (cosmic-web labels nested in a group
   // that rides −camWorld) and must be rebased with fo.rel() before projecting.
-  private readonly labelEntries: { sprite: Sprite; priority: number; world?: boolean }[] = [];
+  private readonly labelEntries: { sprite: Sprite; priority: number; world?: boolean; nestedIn?: Group }[] = [];
   private readonly projTmp = new Vector3();
   /** max persistent labels the declutter keeps (0 = hover-only "explorer" mode) */
   private maxLabels = 12;
@@ -355,6 +355,8 @@ export class UnifiedWorld implements WorldFacade {
   onChange?: () => void;
   private readonly focusGetTmp = new Vector3();
   private readonly goToTmp = new Vector3();
+  private readonly groundTmp = new Vector3(); // ground-observer position scratch
+  private readonly idTmp = new Vector3(); // sky-identification scratch
   private readonly pickWorld = new Vector3();
   private readonly pickHit = new Vector3();
   private readonly pickSphere = new Sphere();
@@ -528,6 +530,10 @@ export class UnifiedWorld implements WorldFacade {
       this.labelEntries.push({ sprite: b.label, priority });
     });
     for (const r of this.rings) this.labelEntries.push({ sprite: r.label, priority: 25 });
+    // craft labels: below moons — they respect the density slider + collide-resolve.
+    // They live INSIDE the shell group (Earth-local coords), so the declutter pass
+    // offsets by the group's position to get camera-relative.
+    for (const l of this.orbitalShell.labels()) this.labelEntries.push({ sprite: l, priority: 22, nestedIn: this.orbitalShell.group });
     // cosmic-web Local Group labels (Andromeda first); only live at the Cosmos band
     this.cosmicWeb.localGroupLabels().forEach((label, i) => this.labelEntries.push({ sprite: label, priority: 46 - i * 2, world: true }));
     this.labelEntries.sort((a, b) => b.priority - a.priority);
@@ -546,6 +552,9 @@ export class UnifiedWorld implements WorldFacade {
       if (e.world) {
         if (!cosmosVisible) continue; // cosmic-web labels only matter at the Cosmos band
         this.fo.rel(s.position, this.projTmp); // absolute AU → camera-relative
+      } else if (e.nestedIn) {
+        if (!s.visible || !e.nestedIn.visible) continue; // group-local → camera-relative
+        this.projTmp.copy(s.position).add(e.nestedIn.position);
       } else {
         if (!s.visible) continue;
         this.projTmp.copy(s.position);
@@ -905,7 +914,7 @@ export class UnifiedWorld implements WorldFacade {
 
     // Layer 6: the orbital shell rides Earth — debris clouds fade in on approach,
     // named-craft dots closer (setVisibility's two bands)
-    this.orbitalShell.step(seconds);
+    this.orbitalShell.step(seconds, this.clock.dt);
     this.orbitalShell.setVisibility(earthCamDist);
     if (this.orbitalShell.group.visible) this.fo.place(this.orbitalShell.group, earthWorld);
 
@@ -1028,10 +1037,11 @@ export class UnifiedWorld implements WorldFacade {
       // vector (focus − camWorld) so vertical drag feels the same across a 'v' toggle.
       this.camera.lookAt(-cp * Math.sin(this.yaw), -Math.sin(this.pitch), -cp * Math.cos(this.yaw));
       this.camera.fov = this.fov;
-      // near = 150 km, not 150,000: Phobos orbits 9,376 km from Mars — a 1e-3 AU near
-      // plane clipped every close-in moon out of its own system's sky. The log depth
-      // buffer keeps precision workable across the huge near/far ratio.
-      this.camera.near = 1e-6;
+      // near = 150 m: a GROUND observer stands ~3 km above the mesh and needs the
+      // terrain under their feet (the horizon!) to survive the near plane; 1e-6 AU
+      // (150 km) also clipped Phobos from Mars. The log depth buffer keeps precision
+      // workable across the huge near/far ratio.
+      this.camera.near = 1e-9;
       this.camera.far = 1e14;
     } else {
       this.camera.lookAt(this.fo.rel(this.focusWorld, this.tmp));
@@ -1398,8 +1408,11 @@ export class UnifiedWorld implements WorldFacade {
     let bestDist = Infinity;
     for (const t of this.pickTargets()) {
       t.position(this.pickWorld);
+      // never pick the body you're standing on (observing FROM a craft, its own pick
+      // sphere would otherwise swallow every ray — the camera sits inside it)
+      if (this.pickWorld.distanceToSquared(r.origin) < 1e-14) continue;
       const camDist = this.pickWorld.distanceTo(this.fo.camWorld);
-      const pickRadius = Math.max(t.radius * 1.6, camDist * 0.02); // tiny true-scale bodies stay clickable
+      const pickRadius = Math.max(t.radius * 1.6, camDist * (t.pickAngle ?? 0.02)); // tiny true-scale bodies stay clickable
       this.pickSphere.set(this.pickWorld, pickRadius);
       if (r.intersectSphere(this.pickSphere, this.pickHit)) {
         const d = this.pickHit.distanceTo(r.origin);
@@ -1493,6 +1506,61 @@ export class UnifiedWorld implements WorldFacade {
   /** Show a constellation's real asterism figure on the sky and aim the observer at it.
    *  Enters observer mode from Earth if not already standing somewhere (asterisms are an
    *  Earth-vantage construct). `id` is the IAU 3-letter code. */
+  // ---- Layer 7: "what is that?" — a ground vantage + coordinate-aimed identification ----
+
+  /** Stand at a latitude/longitude on Earth's surface (~3 km up, so the terrain under
+   *  your feet renders as a real horizon). The position getter recomputes from GMST
+   *  every frame, so you RIDE the turning planet — run time and the sky wheels over. */
+  standAt(latDeg: number, lonDeg: number): void {
+    const get = (): Vector3 =>
+      groundDir(latDeg, lonDeg, this.clock.seconds, this.groundTmp)
+        .multiplyScalar(EARTH_RADIUS_AU * 1.0005)
+        .add(this.earthBody.world);
+    const ns = latDeg >= 0 ? 'N' : 'S';
+    const ew = lonDeg >= 0 ? 'E' : 'W';
+    this.viewFrom(get, `${Math.abs(latDeg).toFixed(1)}°${ns} ${Math.abs(lonDeg).toFixed(1)}°${ew}`);
+  }
+
+  /** A sky direction (render frame) for an Alt/Az or RA/Dec query. RA in HOURS. */
+  skyDir(spec: { mode: 'altaz' | 'radec'; lat: number; lon: number; c1: number; c2: number }, out = new Vector3()): Vector3 {
+    return spec.mode === 'altaz'
+      ? altazDir(spec.lat, spec.lon, spec.c1, spec.c2, this.clock.seconds, out)
+      : eclipticDirFromRaDec(spec.c1 * 15, spec.c2, out).normalize();
+  }
+
+  /** Aim the observer's free-look along `dir` and identify what's there: the nearest
+   *  solar-system body wins when it's within a few degrees (it's the bright mover);
+   *  otherwise the nearest naked-eye catalogue star. Selects the answer so the
+   *  inspector shows its full card. */
+  whatIsThat(dir: Vector3): { label: string; sub: string } | null {
+    const from = this.observerGet ? this.observerGet() : this.earthBody.world;
+    this.yaw = Math.atan2(-dir.x, -dir.z);
+    this.pitch = Math.max(-1.55, Math.min(1.55, Math.asin(Math.max(-1, Math.min(1, -dir.y)))));
+    // candidate bodies: Sun/planets/GC/nearest stars, the moons, nearby craft
+    let bodyT: FocusTarget | null = null;
+    let bodySep = Infinity;
+    const consider = (t: FocusTarget): void => {
+      const p = t.position(this.idTmp).sub(from);
+      if (p.lengthSq() < 1e-18) return; // the thing we're standing on
+      const sep = (Math.acos(Math.max(-1, Math.min(1, p.normalize().dot(dir)))) * 180) / Math.PI;
+      if (sep < bodySep) { bodySep = sep; bodyT = t; }
+    };
+    for (const t of this.pickables) consider(t);
+    for (const mb of this.moonBodies) consider(mb.target);
+    if (this.earthBody.world.distanceTo(from) < SAT_SHOW_AU) for (const t of this.orbitalShell.craftTargets()) consider(t);
+    const star = this.starCatalog.nearestTo(dir, from);
+    // a solar-system body within 2.5° beats a star unless the star is much closer to the aim
+    if (bodyT && bodySep < 2.5 && (!star || bodySep <= star.sepDeg + 2)) {
+      this.select(bodyT);
+      return { label: (bodyT as FocusTarget).label, sub: `${bodySep.toFixed(1)}° from your aim` };
+    }
+    if (star) {
+      this.select(star.target);
+      return { label: star.target.label, sub: `mag ${star.mag.toFixed(1)} · ${star.sepDeg.toFixed(1)}° from your aim` };
+    }
+    return null;
+  }
+
   showConstellation(id: string): void {
     // Asterisms are a geocentric construct: the figure is drawn at FIXED sky directions, so
     // it only lands on the stars from a near-Sun vantage (from a distant star the parallax-

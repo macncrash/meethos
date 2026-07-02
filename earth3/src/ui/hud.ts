@@ -3,7 +3,7 @@
 // game-over). It reads the Regime/FocusTarget contract via the ScaleManager and
 // the DefenseGame for game state — no physics access.
 import type { SimClock } from '../core/clock';
-import { formatStardate } from '../core/units';
+import { formatStardate, formatUTCDate } from '../core/units';
 import type { Ray } from 'three';
 import type { WorldFacade } from '../world/facade';
 import type { WorldBus } from '../world/bus';
@@ -14,6 +14,7 @@ export class Hud {
   private readonly inspector = byId('inspector');
   private readonly era = byId('era');
   private readonly stardate = byId('stardate');
+  private readonly realdate = byId('realdate');
   private readonly rateLabel = byId('rate-label');
   private readonly stats = byId('stats');
   private readonly toast = byId('toast');
@@ -187,9 +188,11 @@ export class Hud {
     if (cos.atCosmos && cos.forming) {
       this.era.textContent = 'COSMIC TIME';
       this.stardate.textContent = `${cos.ageGyr.toFixed(1)} Gyr`;
+      this.realdate.textContent = '';
     } else {
       if (cos.atCosmos) this.era.textContent = this.manager.active.label.toUpperCase();
       this.stardate.textContent = formatStardate(this.clock.seconds);
+      this.realdate.textContent = formatUTCDate(this.clock.seconds); // real calendar (J2000 epoch)
     }
     this.rateLabel.textContent = this.clock.rateLabel;
 

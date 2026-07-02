@@ -31,6 +31,20 @@ export const RATE_LADDER: ReadonlyArray<{ rate: number; label: string }> = [
 
 export const DEFAULT_RATE_INDEX = 3; // 1 yr/s
 
+/** The sim's epoch is J2000 (2000-01-01 12:00 UTC) — the planets' Keplerian elements
+ *  are J2000 with `seconds` as the offset, so the calendar below is REAL: sidereal
+ *  time, launch windows and sky identification all hang off this anchor. */
+export const J2000_UTC_MS = Date.UTC(2000, 0, 1, 12, 0, 0);
+
+/** Sim time → real UTC calendar date ("2000-03-14" style; year-only at deep time).
+ *  JS Date holds ±275 kyr; beyond that the calendar is meaningless anyway. */
+export function formatUTCDate(seconds: number): string {
+  const years = seconds / SECONDS_PER_YEAR;
+  if (Math.abs(years) > 200_000) return `${Math.round(2000 + years).toLocaleString()} CE`;
+  const d = new Date(J2000_UTC_MS + seconds * 1000);
+  return d.toISOString().slice(0, 10);
+}
+
 /** Format simulated elapsed time adaptively: days → years → kyr → Myr. */
 export function formatStardate(seconds: number): string {
   const years = seconds / SECONDS_PER_YEAR;

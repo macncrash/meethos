@@ -12,6 +12,8 @@ import {
   BufferGeometry,
   Color,
   Group,
+  LineBasicMaterial,
+  LineLoop,
   Points,
   PointsMaterial,
   Sprite,
@@ -32,7 +34,9 @@ interface SatEntry {
   s: SatelliteData;
   dot: Sprite;
   label: Sprite;
+  ring: LineLoop; // the orbit path — shown INSTEAD of the dot when time runs too fast to track
   local: Vector3; // Earth-relative AU (updated each frame)
+  coherent: boolean; // false when the sim rate advances >~1/8 orbit per frame (dot would strobe)
 }
 
 export class OrbitalShell {
@@ -44,14 +48,26 @@ export class OrbitalShell {
   private shells_: FocusTarget[] | null = null;
 
   constructor(private readonly earthWorld: () => Vector3) {
-    // named spacecraft — constant-screen-size dots + labels, positions driven in step()
+    // named spacecraft — constant-screen-size dots + labels, positions driven in step().
+    // Each also gets its orbit RING, shown instead of the dot whenever the sim rate
+    // advances a large fraction of the orbit per frame — the honest "motion blur"
+    // (a 92-minute orbit at 1 yr/s IS a ring, not a dot).
     for (const s of SATELLITES) {
       const dot = new Sprite(new SpriteMaterial({ map: dotTexture(), color: new Color(s.color), sizeAttenuation: false, depthTest: false, transparent: true }));
       dot.scale.set(0.006, 0.006, 1);
       dot.renderOrder = 2;
       const label = makeLabel(s.label, s.color, 0.026);
-      this.group.add(dot, label);
-      this.sats.push({ s, dot, label, local: new Vector3() });
+      const ringPts: Vector3[] = [];
+      for (let i = 0; i < 96; i++) {
+        ringPts.push(satLocalPosition(s, ((i / 96) * s.periodMin - s.phaseDeg) * 60, new Vector3())); // phase offset irrelevant for a closed loop
+      }
+      const ring = new LineLoop(
+        new BufferGeometry().setFromPoints(ringPts),
+        new LineBasicMaterial({ color: s.color, transparent: true, opacity: 0.28, depthWrite: false }),
+      );
+      ring.visible = false;
+      this.group.add(dot, label, ring);
+      this.sats.push({ s, dot, label, ring, local: new Vector3(), coherent: true });
     }
     // debris/constellation shells — static point clouds (the shells precess slowly in
     // reality; at display scale a fixed sample reads correctly)
@@ -82,25 +98,36 @@ export class OrbitalShell {
     this.group.visible = false;
   }
 
-  /** advance the named satellites along their orbits (Earth-local AU) */
-  step(seconds: number): void {
+  /** advance the named satellites along their orbits (Earth-local AU). `dtPerFrame` is
+   *  the sim-seconds the clock advanced this frame — when that eats more than ~1/8 of an
+   *  orbit, the dot would strobe across random phases, so it's flagged incoherent. */
+  step(seconds: number, dtPerFrame: number): void {
     for (const e of this.sats) {
       satLocalPosition(e.s, seconds, e.local);
       e.dot.position.copy(e.local);
       e.label.position.copy(e.local);
+      e.coherent = dtPerFrame < e.s.periodMin * 60 * 0.125;
     }
   }
 
   /** two visibility bands: the debris clouds resolve from further out than the
-   *  named-craft dots (which would otherwise pile on the Earth dot as clutter). */
+   *  named craft (which would otherwise pile on the Earth dot as clutter). At
+   *  incoherent time-rates each craft shows its orbit ring instead of a strobing dot. */
   setVisibility(earthCamDist: number): void {
     this.group.visible = earthCamDist < ORBITAL_SHOW_AU;
     if (!this.group.visible) return;
     const showSats = earthCamDist < SAT_SHOW_AU;
     for (const e of this.sats) {
-      e.dot.visible = showSats;
-      e.label.visible = showSats;
+      e.dot.visible = showSats && e.coherent;
+      e.label.visible = showSats && e.coherent;
+      e.ring.visible = showSats && !e.coherent;
     }
+  }
+
+  /** the craft name labels — registered into the world's declutter pass so they respect
+   *  the density slider and collide-resolve against the Earth/Moon labels. */
+  labels(): Sprite[] {
+    return this.sats.map((e) => e.label);
   }
 
   /** The named craft as pickable/searchable targets, built ONCE (stable identities —
@@ -110,6 +137,7 @@ export class OrbitalShell {
       id: `sat-${e.s.id}`,
       label: e.s.label,
       radius: 5e-9, // ~1 km-scale object; the pick radius floor keeps it clickable
+      pickAngle: 0.004, // tight cone — LEO craft huddle Earth's disc and must not steal its clicks
       position: (out: Vector3) => out.copy(e.local).add(this.earthWorld()),
       info: (): InspectorInfo => satInfo(e.s),
     }));

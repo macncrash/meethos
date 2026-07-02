@@ -27,6 +27,9 @@ export interface FocusTarget {
   diveDistance?: number;
   /** seed handed to a configurable child regime on dive (e.g. a star's system) */
   seed?: number;
+  /** pick-sphere angular size as a fraction of camera distance (default 0.02). Tiny
+   *  craft huddled against a planet use a tighter cone so they can't steal its clicks. */
+  pickAngle?: number;
   info(clock: SimClock): InspectorInfo;
 }
 

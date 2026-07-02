@@ -227,6 +227,43 @@ export class StarCatalog {
     return out;
   }
 
+  /** The star you MEANT when you pointed: the brightest naked-eye star within 1.5° of
+   *  the sky direction `dir` (people ask about the bright one), else the nearest. As
+   *  currently projected — respects setObserver. */
+  nearestTo(dir: Vector3, fromWorld: Vector3): { target: FocusTarget; sepDeg: number; mag: number } | null {
+    if (!this.worldPos || !this.amagAttr) return null;
+    const pos = this.worldPos;
+    const amag = this.amagAttr.array as Float32Array;
+    const CONE = Math.cos((1.5 * Math.PI) / 180);
+    let nearest = -1;
+    let nearestDot = -2;
+    let bright = -1;
+    let brightMag = Infinity;
+    for (let i = 0; i < amag.length; i++) {
+      if (amag[i]! > MAG_LIMIT) continue; // not naked-eye from this vantage (or suppressed Sun)
+      this._p.set(pos[i * 3]! - fromWorld.x, pos[i * 3 + 1]! - fromWorld.y, pos[i * 3 + 2]! - fromWorld.z).normalize();
+      const d = this._p.dot(dir);
+      if (d > nearestDot) { nearestDot = d; nearest = i; }
+      if (d > CONE && amag[i]! < brightMag) { brightMag = amag[i]!; bright = i; }
+    }
+    const idx = bright >= 0 ? bright : nearest;
+    if (idx < 0) return null;
+    // recompute the chosen star's separation
+    this._p.set(pos[idx * 3]! - fromWorld.x, pos[idx * 3 + 1]! - fromWorld.y, pos[idx * 3 + 2]! - fromWorld.z).normalize();
+    const sep = (Math.acos(Math.min(1, Math.max(-1, this._p.dot(dir)))) * 180) / Math.PI;
+    return {
+      target: {
+        id: `hyg-${idx}`,
+        label: this.names.get(idx)?.name ?? `star HYG ${idx}`,
+        radius: 0.25,
+        position: (out) => out.set(pos[idx * 3]!, pos[idx * 3 + 1]!, pos[idx * 3 + 2]!),
+        info: () => this.starCard(idx),
+      },
+      sepDeg: sep,
+      mag: amag[idx]!,
+    };
+  }
+
   private starCard(i: number): InspectorInfo {
     const named = this.names.get(i);
     const dpc = this.distPc?.[i] ?? 0;

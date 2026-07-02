@@ -17,6 +17,33 @@
 
     <!-- Top-center: jump-to search (press /) — type a name, ↵ fly there, ⇧↵ view from there -->
     <button id="searchbtn" title="Search &amp; go to (press /)">⌕ <span>Search</span></button>
+    <button id="skybtn" title="What is that? — stand at a place on Earth and identify the sky">⌖ <span>Sky</span></button>
+
+    <!-- "What is that?" — ground location + coordinates → aim the real sky and identify -->
+    <div id="skyid" hidden role="dialog" aria-label="Sky identification">
+      <div class="rp-head"><span>⌖ What is that?</span><button id="sky-close" title="Close">✕</button></div>
+      <div class="sky-row">
+        <span class="sky-cap">Ground</span>
+        <input id="sky-lat" type="text" inputmode="decimal" value="40.7" aria-label="Latitude" /><span class="sky-unit">°N</span>
+        <input id="sky-lon" type="text" inputmode="decimal" value="-74.0" aria-label="Longitude" /><span class="sky-unit">°E</span>
+      </div>
+      <div class="sky-row sky-modes">
+        <label><input type="radio" name="sky-mode" value="altaz" checked /> Alt / Az</label>
+        <label><input type="radio" name="sky-mode" value="radec" /> RA / Dec</label>
+      </div>
+      <div class="sky-row">
+        <span class="sky-cap" id="sky-c1-cap">Alt</span>
+        <input id="sky-c1" type="text" inputmode="decimal" value="45" aria-label="First coordinate" />
+        <span class="sky-cap" id="sky-c2-cap">Az</span>
+        <input id="sky-c2" type="text" inputmode="decimal" value="180" aria-label="Second coordinate" />
+        <span class="sky-unit">°</span>
+      </div>
+      <div class="sky-actions">
+        <button id="sky-stand">◉ Stand here</button>
+        <button id="sky-aim">⌖ What is that?</button>
+      </div>
+      <div id="sky-result" hidden></div>
+    </div>
     <div id="search" hidden role="dialog" aria-label="Search destinations">
       <input id="search-input" type="text" autocomplete="off" spellcheck="false" placeholder="Go to a planet, star or galaxy…" />
       <ul id="search-results"></ul>
@@ -65,6 +92,7 @@
       <div id="clock">
         <span id="era" class="era">—</span>
         <span id="stardate" class="stardate">—</span>
+        <span id="realdate" class="realdate" title="Real calendar — the sim's epoch is J2000">—</span>
       </div>
       <div id="transport">
         <button data-rate="pause" title="Pause">❚❚</button>

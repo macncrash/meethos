@@ -432,3 +432,75 @@ html, body {
   font-size: 11px;
 }
 .search-foot b { color: var(--accent2); font-weight: 600; }
+
+/* ---- "what is that?" — sky identification panel ---- */
+#skybtn {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(calc(-50% + 96px));
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--panel-line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink-dim);
+  font: 12px/1 var(--font);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+#skybtn:hover { color: var(--ink); border-color: var(--accent2); }
+
+#skyid {
+  position: fixed;
+  top: 54px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 19;
+  width: min(340px, 92vw);
+  padding: 10px 12px 12px;
+  background: var(--panel);
+  border: 1px solid var(--panel-line);
+  border-radius: 12px;
+  backdrop-filter: blur(12px);
+  font-size: 12px;
+}
+#skyid .rp-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; color: var(--accent); }
+#skyid .rp-head button { border: none; background: none; color: var(--ink-dim); cursor: pointer; font-size: 13px; }
+#skyid .rp-head button:hover { color: var(--ink); }
+.sky-row { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+.sky-cap { color: var(--ink-dim); min-width: 42px; }
+.sky-unit { color: var(--ink-dim); font-size: 10px; }
+#skyid input[type='text'] {
+  width: 62px;
+  padding: 5px 7px;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: rgba(6, 10, 20, 0.6);
+  color: var(--ink);
+  font: 12px var(--font);
+  outline: none;
+}
+#skyid input[type='text']:focus { border-color: var(--accent2); }
+.sky-modes { gap: 14px; color: var(--ink-dim); }
+.sky-modes label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.sky-actions { display: flex; gap: 8px; margin-top: 9px; }
+.sky-actions button {
+  flex: 1;
+  padding: 7px 0;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: rgba(122, 168, 255, 0.1);
+  color: var(--ink);
+  font: 12px var(--font);
+  cursor: pointer;
+}
+.sky-actions button:hover { border-color: var(--accent2); background: rgba(122, 168, 255, 0.22); }
+#sky-result { margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--panel-line); color: var(--ink-dim); line-height: 1.5; }
+#sky-result b { color: var(--accent); }
+.sky-sub { color: var(--ink-dim); font-size: 11px; }
+.realdate { color: var(--ink-dim); font-size: 10px; letter-spacing: 0.04em; }

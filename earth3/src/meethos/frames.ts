@@ -57,6 +57,62 @@ export function eclipticToGalacticMatrix(): Matrix4 {
 export const GC_RA_DEG = 266.41683;
 export const GC_DEC_DEG = -29.00781;
 
+// ---- the ground-observer frame: stand at a lat/lon and the sky is REAL ----
+// The sim clock's zero IS the J2000 epoch (the planets use J2000 elements with
+// seconds offsets), so sidereal time falls straight out of the calendar.
+
+/** Greenwich Mean Sidereal Time at J2000 + `seconds`, in radians (IAU 1982 linear
+ *  term — arcsecond-per-century drift ignored; plenty for a naked-eye sky). */
+export function gmstRad(seconds: number): number {
+  const days = seconds / 86_400; // days since J2000 (UT ≈ TT at this fidelity)
+  const deg = 280.46061837 + 360.98564736629 * days;
+  return ((deg % 360) + 360) % 360 * DEG;
+}
+
+/** Earth's spin axis (north celestial pole) in the render frame — the ecliptic
+ *  frame's +Y tipped by the obliquity toward +Z (the true J2000 orientation, NOT
+ *  the stylized tilt of the visual globe). */
+export function earthPoleDir(out = new Vector3()): Vector3 {
+  return out.set(0, Math.cos(OBLIQUITY), Math.sin(OBLIQUITY));
+}
+
+/** The unit direction from Earth's centre to the ground point (latDeg, lonDeg) at
+ *  sim time `seconds`, in the render frame. Longitude east-positive; the point
+ *  rides Earth's rotation via GMST, so a fixed city sweeps the sky as time runs. */
+export function groundDir(latDeg: number, lonDeg: number, seconds: number, out = new Vector3()): Vector3 {
+  // the ground point's right ascension = GMST + east longitude
+  const ra = gmstRad(seconds) + lonDeg * DEG;
+  const dec = latDeg * DEG;
+  // equatorial → ecliptic → render (same chain as equatorialDir/eclipticDirFromRaDec)
+  const cd = Math.cos(dec);
+  const eq = out.set(cd * Math.cos(ra), cd * Math.sin(ra), Math.sin(dec));
+  const ce = Math.cos(OBLIQUITY);
+  const se = Math.sin(OBLIQUITY);
+  const yEcl = eq.y * ce + eq.z * se;
+  const zEcl = -eq.y * se + eq.z * ce;
+  return out.set(eq.x, zEcl, yEcl);
+}
+
+/** Alt/Az (degrees, azimuth from North through East) at ground point (latDeg,
+ *  lonDeg) and sim time `seconds` → unit sky direction in the render frame. */
+export function altazDir(latDeg: number, lonDeg: number, altDeg: number, azDeg: number, seconds: number, out = new Vector3()): Vector3 {
+  const up = groundDir(latDeg, lonDeg, seconds, new Vector3()); // zenith
+  const pole = earthPoleDir(new Vector3());
+  // local North = the pole projected onto the horizon plane; East completes the triad
+  const north = pole.clone().addScaledVector(up, -pole.dot(up)).normalize();
+  // East = North × Up: at the equator (up=x̂_eq, north=pole ẑ_eq) this gives +ŷ_eq,
+  // the direction of increasing RA — which is the way the ground turns. ✓
+  const east = new Vector3().crossVectors(north, up);
+  const alt = altDeg * DEG;
+  const az = azDeg * DEG;
+  const ca = Math.cos(alt);
+  return out
+    .copy(north).multiplyScalar(ca * Math.cos(az))
+    .addScaledVector(east, ca * Math.sin(az))
+    .addScaledVector(up, Math.sin(alt))
+    .normalize();
+}
+
 /** A basis matrix whose columns are the render-frame directions of the galactic
  *  axes: +X toward the Galactic Centre, +Z toward the North Galactic Pole. Apply
  *  it to a galactic-frame position (disk in X–Y, Z = north) to place a star cloud
