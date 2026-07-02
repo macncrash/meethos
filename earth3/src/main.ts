@@ -163,7 +163,7 @@ const searchBox = document.getElementById('search');
 const searchInput = document.getElementById('search-input') as HTMLInputElement | null;
 const searchResults = document.getElementById('search-results');
 // a friendly starting set shown before the user types anything
-const SEARCH_DEFAULTS = ['Earth', 'Moon', 'Mars', 'Titan', 'Jupiter', 'Sun', 'Sirius', 'Orion', 'Andromeda (M31)'];
+const SEARCH_DEFAULTS = ['Earth', 'Moon', 'ISS', 'Space junk (LEO)', 'Mars', 'Titan', 'Sun', 'Orion', 'Andromeda (M31)'];
 let searchAll: SearchEntry[] = [];
 let searchHits: SearchEntry[] = [];
 let searchSel = 0;

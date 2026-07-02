@@ -57,6 +57,7 @@ import { CosmicWeb } from './cosmicWeb';
 import { StarCatalog } from './starCatalog';
 import { ConstellationFigures } from './constellationFigures';
 import { MOONS, MOON_COUNTS, KM_PER_AU, moonLocalPosition, type MoonData } from '../data/moons';
+import { OrbitalShell, SAT_SHOW_AU } from './orbitalShell';
 import { GalaxyMerger } from './galaxyMerger';
 
 const ORIGIN = new Vector3(0, 0, 0);
@@ -225,7 +226,7 @@ const STARS = [
 /** one row in the go-to search palette: a named destination + how to reach it. */
 export interface SearchEntry {
   name: string;
-  kind: 'planet' | 'moon' | 'star' | 'galaxy' | 'constellation';
+  kind: 'planet' | 'moon' | 'sat' | 'star' | 'galaxy' | 'constellation';
   sub?: string; // secondary line, e.g. "8.6 ly · Canis Major"
   target?: FocusTarget; // a place to fly to (bodies/stars/galaxies)
   constellationId?: string; // a sky figure to aim at instead (IAU code)
@@ -258,6 +259,8 @@ export class UnifiedWorld implements WorldFacade {
   private readonly starBodies: { body: Body; name: string }[] = [];
   // the major moons: each rides its parent planet's absolute position every frame
   private readonly moonBodies: { m: MoonData; parent: Body; parentLabel: string; body: Body; target: FocusTarget }[] = [];
+  // Layer 6: Earth's orbital shell — named craft + debris clouds (constructed after earthBody)
+  private readonly orbitalShell: OrbitalShell;
   private activeStarName: string | null = null;
 
   // the city — Earth's innermost band: a SimCity tile as a patch on the globe's pole,
@@ -422,6 +425,11 @@ export class UnifiedWorld implements WorldFacade {
       });
     }
 
+    // Layer 6: the orbital shell — ISS/Hubble/GPS/GEO + the debris population, all
+    // Earth-centred; the group is placed at Earth's camera-relative position each frame
+    this.orbitalShell = new OrbitalShell(() => this.earthBody.world);
+    scene.add(this.orbitalShell.group);
+
     // comets ride a group rebased by -camWorld each frame; they home on Earth's
     // absolute heliocentric position and emit ImpactEvents the EarthRegime consumes.
     scene.add(this.cometGroup);
@@ -568,6 +576,7 @@ export class UnifiedWorld implements WorldFacade {
     this.starSystem.object3d.visible = false;
     this.earth.object3d.visible = false;
     this.surface.object3d.visible = false;
+    this.orbitalShell.group.visible = false;
     for (const b of this.bodies) { b.dot.visible = false; b.label.visible = false; }
     for (const ring of this.rings) { ring.line.visible = false; ring.label.visible = false; }
     if (this.orbitLine) this.orbitLine.visible = false;
@@ -893,6 +902,12 @@ export class UnifiedWorld implements WorldFacade {
     // the city band: only drawn when you've descended near the surface (and only then
     // are its layer-scoped lights live — an invisible subtree contributes no light).
     this.surface.object3d.visible = showGlobe && earthCamDist < CITY_SHOW;
+
+    // Layer 6: the orbital shell rides Earth — debris clouds fade in on approach,
+    // named-craft dots closer (setVisibility's two bands)
+    this.orbitalShell.step(seconds);
+    this.orbitalShell.setVisibility(earthCamDist);
+    if (this.orbitalShell.group.visible) this.fo.place(this.orbitalShell.group, earthWorld);
 
     // reference rings (centred on the Sun = origin), fading by zoom band
     for (const ring of this.rings) {
@@ -1221,6 +1236,8 @@ export class UnifiedWorld implements WorldFacade {
     for (const mb of this.moonBodies) {
       out.push({ name: mb.m.label, kind: 'moon', sub: `moon of ${mb.parentLabel}`, target: mb.target });
     }
+    for (const t of this.orbitalShell.craftTargets()) out.push({ name: t.label, kind: 'sat', sub: 'Earth orbit', target: t });
+    for (const t of this.orbitalShell.shellTargets()) out.push({ name: t.label, kind: 'sat', sub: 'debris field', target: t });
     for (const g of this.cosmicWeb.searchTargets()) out.push({ name: g.label, kind: 'galaxy', target: g });
     const seen = new Set(out.map((e) => e.name.toLowerCase()));
     for (const s of this.starCatalog.namedTargets()) {
@@ -1358,6 +1375,8 @@ export class UnifiedWorld implements WorldFacade {
     for (const mb of this.moonBodies) {
       if (mb.parent.world.distanceTo(this.fo.camWorld) < (mb.m.aKm / KM_PER_AU) * 50) out.push(mb.target);
     }
+    // named spacecraft: pickable only when their dots are shown (near Earth)
+    if (this.earthBody.world.distanceTo(this.fo.camWorld) < SAT_SHOW_AU) out.push(...this.orbitalShell.craftTargets());
     if (!this.activeStarName) return out;
     const star = this.starBodies.find((s) => s.name === this.activeStarName);
     if (!star) return out;
