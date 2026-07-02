@@ -103,8 +103,29 @@ const routeStatsEl = document.getElementById('route-stats');
 const routeSpeed = document.getElementById('route-speed') as HTMLInputElement | null;
 const routeSpeedLabel = document.getElementById('route-speed-label');
 const routeFly = document.getElementById('route-fly');
-const fmtLy = (ly: number): string => (ly >= 1e6 ? `${(ly / 1e6).toFixed(2)} Mly` : ly >= 1e3 ? `${(ly / 1e3).toFixed(1)} kly` : `${ly.toFixed(2)} ly`);
-const fmtYr = (y: number): string => (y >= 1e6 ? `${(y / 1e6).toFixed(2)} Myr` : y >= 1e3 ? `${(y / 1e3).toFixed(1)} kyr` : `${y.toFixed(1)} yr`);
+// route distances/times span from Earth→Moon (384,400 km, seconds at warp) to
+// intergalactic (Mly, Myr) — pick the unit that keeps 2-3 significant figures
+const AU_PER_LY_UI = 63_241.077;
+const KM_PER_AU_UI = 149_597_870.7;
+const fmtLy = (ly: number): string => {
+  if (ly >= 1e6) return `${(ly / 1e6).toFixed(2)} Mly`;
+  if (ly >= 1e3) return `${(ly / 1e3).toFixed(1)} kly`;
+  if (ly >= 0.1) return `${ly.toFixed(2)} ly`;
+  const au = ly * AU_PER_LY_UI;
+  if (au >= 0.1) return `${au.toFixed(2)} AU`;
+  return `${Math.round(au * KM_PER_AU_UI).toLocaleString()} km`;
+};
+const fmtYr = (y: number): string => {
+  if (y >= 1e6) return `${(y / 1e6).toFixed(2)} Myr`;
+  if (y >= 1e3) return `${(y / 1e3).toFixed(1)} kyr`;
+  if (y >= 0.1) return `${y.toFixed(1)} yr`;
+  const d = y * 365.25;
+  if (d >= 1) return `${d.toFixed(1)} d`;
+  const h = d * 24;
+  if (h >= 1) return `${h.toFixed(1)} h`;
+  const min = h * 60;
+  return min >= 1 ? `${min.toFixed(1)} min` : `${(min * 60).toFixed(1)} s`;
+};
 const routeSpeedC = (): number => ROUTE_SPEEDS[Number(routeSpeed?.value ?? 7)] ?? 100;
 function renderRoute(): void {
   if (!unified || !routePanel) return;
@@ -142,7 +163,7 @@ const searchBox = document.getElementById('search');
 const searchInput = document.getElementById('search-input') as HTMLInputElement | null;
 const searchResults = document.getElementById('search-results');
 // a friendly starting set shown before the user types anything
-const SEARCH_DEFAULTS = ['Earth', 'Mars', 'Saturn', 'Jupiter', 'Sun', 'Sirius', 'Orion', 'Andromeda (M31)', 'Vega'];
+const SEARCH_DEFAULTS = ['Earth', 'Moon', 'Mars', 'Titan', 'Jupiter', 'Sun', 'Sirius', 'Orion', 'Andromeda (M31)'];
 let searchAll: SearchEntry[] = [];
 let searchHits: SearchEntry[] = [];
 let searchSel = 0;

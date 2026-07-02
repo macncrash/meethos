@@ -56,6 +56,7 @@ import { SurfaceRegime } from '../regimes/surface';
 import { CosmicWeb } from './cosmicWeb';
 import { StarCatalog } from './starCatalog';
 import { ConstellationFigures } from './constellationFigures';
+import { MOONS, MOON_COUNTS, KM_PER_AU, moonLocalPosition, type MoonData } from '../data/moons';
 import { GalaxyMerger } from './galaxyMerger';
 
 const ORIGIN = new Vector3(0, 0, 0);
@@ -92,6 +93,7 @@ function planetInfo(p: PlanetData): InspectorInfo {
       ['Orbit', `${p.a.toFixed(2)} AU`],
       ['Year', p.periodYears < 1 ? `${(p.periodYears * 365).toFixed(0)} d` : `${p.periodYears.toFixed(1)} yr`],
       ['Radius', `${p.radiusKm.toLocaleString()} km`],
+      ['Moons', MOON_COUNTS[p.id] ? `${MOON_COUNTS[p.id]} known` : 'none'],
     ],
     blurb: p.blurb,
   };
@@ -111,7 +113,21 @@ interface Body {
   world: Vector3; // absolute position in AU (f64)
   dot: Sprite;
   label: Sprite;
-  kind: 'sun' | 'planet' | 'star';
+  kind: 'sun' | 'planet' | 'star' | 'moon';
+}
+
+/** inspector card for a moon */
+function moonInfo(m: MoonData, parentLabel: string): InspectorInfo {
+  const pd = m.periodDays;
+  return {
+    title: m.label,
+    rows: [
+      ['Orbits', `${parentLabel} · ${m.aKm.toLocaleString()} km`],
+      ['Period', `${pd < 2 ? pd.toFixed(2) : pd.toFixed(1)} d${m.retrograde ? ' · retrograde' : ''}`],
+      ['Radius', `${m.radiusKm.toLocaleString()} km`],
+    ],
+    blurb: m.blurb,
+  };
 }
 
 // The Milky Way as a Points cloud in the SAME AU frame — barred spiral at physical
@@ -209,7 +225,7 @@ const STARS = [
 /** one row in the go-to search palette: a named destination + how to reach it. */
 export interface SearchEntry {
   name: string;
-  kind: 'planet' | 'star' | 'galaxy' | 'constellation';
+  kind: 'planet' | 'moon' | 'star' | 'galaxy' | 'constellation';
   sub?: string; // secondary line, e.g. "8.6 ly · Canis Major"
   target?: FocusTarget; // a place to fly to (bodies/stars/galaxies)
   constellationId?: string; // a sky figure to aim at instead (IAU code)
@@ -240,6 +256,8 @@ export class UnifiedWorld implements WorldFacade {
   // reconfigured for whichever star you've flown closest to (lazy materialization).
   private readonly starSystem = new StarSystemRegime();
   private readonly starBodies: { body: Body; name: string }[] = [];
+  // the major moons: each rides its parent planet's absolute position every frame
+  private readonly moonBodies: { m: MoonData; parent: Body; parentLabel: string; body: Body; target: FocusTarget }[] = [];
   private activeStarName: string | null = null;
 
   // the city — Earth's innermost band: a SimCity tile as a patch on the globe's pole,
@@ -323,6 +341,7 @@ export class UnifiedWorld implements WorldFacade {
   /** highlighted orbit ellipse for the hovered/selected planet (great in pause) */
   private orbitLine: LineLoop | null = null;
   private orbitBodyId: string | null = null;
+  private orbitCenter: Body | null = null; // null = heliocentric (planet); a body = its moon's parent
 
   // ---- WorldFacade state (the band/inspector/picking surface the HUD talks to) ----
   /** all selectable major bodies (Sun, planets, stars, GC), positions in absolute AU */
@@ -376,6 +395,32 @@ export class UnifiedWorld implements WorldFacade {
     this.earth = new EarthRegime(bus);
     this.earth.object3d.scale.setScalar(EARTH_RADIUS_AU);
     scene.add(this.earth.object3d);
+
+    // the major moons — real orbits around their parents' absolute positions. Luna's
+    // parameters also configure the EarthRegime's visual moon MESH (same formula, same
+    // numbers → the lit mesh and the pickable dot coincide): the true 60.3-Earth-radii
+    // gulf replaces the legacy band's stylized close-in moon.
+    const luna = MOONS.find((m) => m.id === 'luna')!;
+    this.earth.configureMoon(
+      (luna.aKm * 1000) / AU_M / EARTH_RADIUS_AU, // orbit radius in globe(=Earth) radii
+      luna.incDeg,
+      luna.periodDays * 86_400,
+      (luna.phaseDeg * Math.PI) / 180,
+    );
+    for (const m of MOONS) {
+      const pIdx = PLANETS.findIndex((p) => p.id === m.planetId);
+      const parent = this.bodies[pIdx + 1]!; // bodies[0] is the Sun
+      this.addBody(moonLocalPosition(m, 0, new Vector3()).add(parent.world), m.label, new Color(m.color), 'moon', 0.008);
+      const body = this.bodies[this.bodies.length - 1]!;
+      this.moonBodies.push({
+        m, parent, parentLabel: PLANETS[pIdx]!.label, body,
+        target: {
+          id: m.id, label: m.label, radius: Math.max((m.radiusKm * 1000) / AU_M, 1e-8),
+          position: (out) => out.copy(body.world),
+          info: () => moonInfo(m, PLANETS[pIdx]!.label),
+        },
+      });
+    }
 
     // comets ride a group rebased by -camWorld each frame; they home on Earth's
     // absolute heliocentric position and emit ImpactEvents the EarthRegime consumes.
@@ -470,6 +515,7 @@ export class UnifiedWorld implements WorldFacade {
       else if (b === this.earthBody) priority = 90;
       else if (b.kind === 'planet') priority = 60 - i; // inner planets (lower index) win
       else if (b === this.gcBody) priority = 35;
+      else if (b.kind === 'moon') priority = 30; // only visible near their parent anyway
       else priority = 40; // nearest stars
       this.labelEntries.push({ sprite: b.label, priority });
     });
@@ -710,31 +756,49 @@ export class UnifiedWorld implements WorldFacade {
     }
   }
 
-  /** highlight the orbit ellipse of the hovered planet (else the focused planet) — a
-   *  projected path arc, drawn on top so it reads even in pause. Solar planets only
-   *  (all in our sector); rebuilt only when the planet changes. */
+  /** highlight the orbit path of the hovered body (else the focused one) — a projected
+   *  arc drawn on top so it reads even in pause. Planets get their heliocentric Kepler
+   *  ellipse; moons get their tilted circle around the parent. Rebuilt only on change. */
   private updateOrbitHighlight(): void {
-    const hovered = this.hoveredTarget ? PLANETS.find((p) => p.id === this.hoveredTarget!.id) : undefined;
-    const focused = PLANETS.find((p) => p.id === this.focusTarget.id);
-    const planet = hovered ?? focused;
-    if (!planet) {
+    // the hovered body wins if it has a drawable orbit; else fall back to the focus
+    let planet: PlanetData | undefined;
+    let moon: (typeof this.moonBodies)[number] | undefined;
+    for (const id of [this.hoveredTarget?.id, this.focusTarget.id]) {
+      if (!id) continue;
+      planet = PLANETS.find((p) => p.id === id);
+      moon = this.moonBodies.find((mb) => mb.m.id === id);
+      if (planet || moon) break;
+    }
+    const useId = moon ? moon.m.id : planet?.id;
+    if (!useId) {
       this.orbitBodyId = null;
       if (this.orbitLine) this.orbitLine.visible = false;
       return;
     }
-    if (this.orbitBodyId !== planet.id) {
-      this.orbitBodyId = planet.id;
+    if (this.orbitBodyId !== useId) {
+      this.orbitBodyId = useId;
       if (this.orbitLine) {
         this.scene.remove(this.orbitLine);
         this.orbitLine.geometry.dispose();
         (this.orbitLine.material as LineBasicMaterial).dispose();
       }
-      const geom = new BufferGeometry().setFromPoints(orbitPath(planet, 256));
+      let pts: Vector3[];
+      if (moon) {
+        // one full period sampled through the same propagator = the exact drawn path
+        const periodSec = moon.m.periodDays * 86_400;
+        pts = Array.from({ length: 128 }, (_, i) => moonLocalPosition(moon.m, (i / 128) * periodSec, new Vector3()));
+        this.orbitCenter = moon.parent;
+      } else {
+        pts = orbitPath(planet!, 256);
+        this.orbitCenter = null;
+      }
+      const geom = new BufferGeometry().setFromPoints(pts);
       this.orbitLine = new LineLoop(geom, new LineBasicMaterial({ color: 0x6fd3ff, transparent: true, opacity: 0.75, depthTest: false }));
       this.orbitLine.renderOrder = 3;
       this.scene.add(this.orbitLine);
     }
-    this.fo.place(this.orbitLine!, ORIGIN); // heliocentric ellipse, rebased to the camera
+    // heliocentric ellipse rebases to the Sun; a moon's circle rides its (moving) parent
+    this.fo.place(this.orbitLine!, this.orbitCenter ? this.orbitCenter.world : ORIGIN);
     this.orbitLine!.visible = true;
   }
 
@@ -777,6 +841,8 @@ export class UnifiedWorld implements WorldFacade {
     // re-place the planets along their true orbits at the sim clock's absolute time
     const seconds = this.clock.seconds;
     for (let i = 0; i < PLANETS.length; i++) planetPosition(PLANETS[i]!, seconds, this.bodies[i + 1]!.world);
+    // moons ride their parents (Luna's identical parameters also drive the regime's mesh)
+    for (const mb of this.moonBodies) moonLocalPosition(mb.m, seconds, mb.body.world).add(mb.parent.world);
 
     const observer = this.observerGet !== null;
     const dist = 10 ** this.logDist;
@@ -850,6 +916,8 @@ export class UnifiedWorld implements WorldFacade {
       } else if (b === this.gcBody) {
         b.dot.visible = dist > 1e6;
         b.label.visible = dist > 5e6;
+      } else if (b.kind === 'moon') {
+        // set in the moons pass below (visibility keys off the PARENT's distance)
       } else {
         // nearest stars
         b.dot.visible = dist < 8e7;
@@ -892,16 +960,44 @@ export class UnifiedWorld implements WorldFacade {
       const inSolar = this.fo.camWorld.length() < OBSERVER_SOLAR_AU;
       for (const b of this.bodies) {
         const local = b.kind === 'sun' || b.kind === 'planet';
-        const atCamera = b.world.distanceToSquared(this.fo.camWorld) < 1e-6; // the body you're standing on
+        // "standing on it" = within 150 km — the old 1e-6 AU² (150,000 km!) wrongly
+        // swallowed the PARENT planet when observing from a close-in moon (Mars from
+        // Phobos at 9,376 km; Uranus from Miranda). Matches the moons pass below.
+        const atCamera = b.world.distanceToSquared(this.fo.camWorld) < 1e-12;
         const vis = local && inSolar && !atCamera;
         b.dot.visible = vis;
         b.label.visible = vis;
       }
       for (const ring of this.rings) { ring.line.visible = false; ring.label.visible = false; }
-      // the sky is the content when standing on a body — never the globe/city (the camera
-      // would otherwise sit inside the true-scale Earth mesh when viewing from Earth).
-      this.earth.object3d.visible = false;
+      // standing ON Earth, the camera would sit inside the true-scale globe — hide it.
+      // From anywhere else nearby (the Moon!) the lit globe IS the view: Earthrise.
+      const onEarth = this.observerWorld.distanceToSquared(this.earthBody.world) < 1e-12;
+      this.earth.object3d.visible = !onEarth && earthCamDist < EARTH_GLOBE_SHOW;
       this.surface.object3d.visible = false;
+      if (this.earth.object3d.visible) {
+        this.earthBody.dot.visible = false; // the globe replaces the marker dot
+        this.earthBody.label.visible = false;
+      }
+    }
+
+    // moons: shown only near their parent, scaled to each orbit (Callisto appears a
+    // hundred Jupiter-radii out; Phobos only when you're hugging Mars). In observer
+    // mode you see a system's moons only when standing WITHIN that system — Phobos and
+    // Deimos from Mars, but no fake Galilean dots from Earth.
+    for (const mb of this.moonBodies) {
+      const b = mb.body;
+      const aAU = mb.m.aKm / KM_PER_AU;
+      const parentDist = mb.parent.world.distanceTo(this.fo.camWorld);
+      const atCamera = b.world.distanceToSquared(this.fo.camWorld) < 1e-12; // standing on it
+      const show = parentDist < Math.max(aAU * 50, observer ? 0.05 : 0) && !atCamera;
+      b.dot.visible = show;
+      b.label.visible = show;
+      // up close, the true-scale Moon MESH takes over from the marker dot. 1e-3 keeps
+      // the dot hidden at the fly-to landing frame (radius·60 ≈ 7e-4) — at 6e-4 the
+      // marker sat superimposed on the lit Moon exactly where the flight ends.
+      if (mb.m.id === 'luna' && this.earth.object3d.visible && b.world.distanceTo(this.fo.camWorld) < 1e-3) {
+        b.dot.visible = false;
+      }
     }
 
     // notify the HUD when the band changes so it rebuilds the breadcrumb/era
@@ -917,7 +1013,10 @@ export class UnifiedWorld implements WorldFacade {
       // vector (focus − camWorld) so vertical drag feels the same across a 'v' toggle.
       this.camera.lookAt(-cp * Math.sin(this.yaw), -Math.sin(this.pitch), -cp * Math.cos(this.yaw));
       this.camera.fov = this.fov;
-      this.camera.near = 1e-3;
+      // near = 150 km, not 150,000: Phobos orbits 9,376 km from Mars — a 1e-3 AU near
+      // plane clipped every close-in moon out of its own system's sky. The log depth
+      // buffer keeps precision workable across the huge near/far ratio.
+      this.camera.near = 1e-6;
       this.camera.far = 1e14;
     } else {
       this.camera.lookAt(this.fo.rel(this.focusWorld, this.tmp));
@@ -1119,6 +1218,9 @@ export class UnifiedWorld implements WorldFacade {
         t.id === 'gc' ? 'galaxy' : t.id === 'sun' || t.id.startsWith('star-') ? 'star' : 'planet';
       out.push({ name: t.label, kind, target: t });
     }
+    for (const mb of this.moonBodies) {
+      out.push({ name: mb.m.label, kind: 'moon', sub: `moon of ${mb.parentLabel}`, target: mb.target });
+    }
     for (const g of this.cosmicWeb.searchTargets()) out.push({ name: g.label, kind: 'galaxy', target: g });
     const seen = new Set(out.map((e) => e.name.toLowerCase()));
     for (const s of this.starCatalog.namedTargets()) {
@@ -1247,19 +1349,25 @@ export class UnifiedWorld implements WorldFacade {
     this.targetLog = Math.max(this.minLog, Math.log10(target.radius * 6));
   }
 
-  /** every selectable body currently in play (adds the active star-system's planets) */
+  /** every selectable body currently in play (adds nearby moons + the active star system) */
   pickTargets(): FocusTarget[] {
     if (this.currentBandId() === 'universe') return this.cosmicWeb.targets(); // galaxies, not planets
-    if (!this.activeStarName) return this.pickables;
+    // moons are pickable only when near their parent — mirrors their visibility, and keeps
+    // a distant click on Jupiter from landing on an invisible Ganymede
+    const out = [...this.pickables];
+    for (const mb of this.moonBodies) {
+      if (mb.parent.world.distanceTo(this.fo.camWorld) < (mb.m.aKm / KM_PER_AU) * 50) out.push(mb.target);
+    }
+    if (!this.activeStarName) return out;
     const star = this.starBodies.find((s) => s.name === this.activeStarName);
-    if (!star) return this.pickables;
+    if (!star) return out;
     const origin = star.body.world;
     const local = this.starSystem.focusTargets().map<FocusTarget>((t) => ({
       id: t.id, label: t.label, radius: t.radius,
-      position: (out) => t.position(out).add(origin),
+      position: (out2) => t.position(out2).add(origin),
       info: (clock) => t.info(clock),
     }));
-    return [...this.pickables, ...local];
+    return [...out, ...local];
   }
 
   /** ray-pick the nearest body. The ray is camera-relative (camera at origin); shift

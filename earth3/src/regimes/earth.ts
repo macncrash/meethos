@@ -52,6 +52,8 @@ interface Shockwave {
 
 const GLOBE_R = 1;
 const SETTLE_R = 1.008; // markers float just above the ground
+// stylized defaults (legacy band): the true Moon is 60.3 Earth radii out — the unified
+// frame calls configureMoon() to put it there; the legacy band keeps the close-in look.
 const MOON_ORBIT = 3.0;
 const MOON_PERIOD_SEC = 27.32 * SECONDS_PER_DAY;
 const MAX_LINKS = 1400;
@@ -68,6 +70,11 @@ export class EarthRegime implements Regime {
   private readonly globe: Mesh;
   private readonly moon: Mesh;
   private readonly moonPos = new Vector3();
+  private moonOrbit = MOON_ORBIT; // orbit radius in globe radii
+  private moonSinInc = 0.0667; // orbit tilt (legacy default ≈ the old 0.2-radius wobble)
+  private moonCosInc = 0.9978;
+  private moonPeriodSec = MOON_PERIOD_SEC;
+  private moonPhase = 0; // position angle at t=0 (rad)
   private readonly settlePoints: Points;
   private readonly links: LineSegments;
   private readonly sizes: Float32Array;
@@ -190,6 +197,20 @@ export class EarthRegime implements Regime {
     });
   }
 
+  /** Re-scale the Moon's orbit (globe-radius units). The unified frame calls this with
+   *  the TRUE geometry — 60.34 Earth radii, 5.14° ecliptic tilt, the real J2000 phase —
+   *  so "from the Earth to the Moon" is the genuine 30-Earth-diameter gulf. The mesh is
+   *  already true-scale (0.27 globe radii ≈ 1737/6371 km). The orbit formula below must
+   *  stay identical to data/moons.ts moonLocalPosition() — the unified frame propagates
+   *  Luna's pickable body through that function with the same parameters. */
+  configureMoon(orbitRadii: number, incDeg: number, periodSec: number, phaseRad: number): void {
+    this.moonOrbit = orbitRadii;
+    this.moonSinInc = Math.sin((incDeg * Math.PI) / 180);
+    this.moonCosInc = Math.cos((incDeg * Math.PI) / 180);
+    this.moonPeriodSec = periodSec;
+    this.moonPhase = phaseRad;
+  }
+
   step(clock: SimClock): void {
     // civilization advances in sim-years, bounded so cosmic rates stay cheap
     const years = Math.min(clock.dt / (SECONDS_PER_DAY * 365.25), MAX_CIV_YEARS_PER_FRAME);
@@ -204,9 +225,9 @@ export class EarthRegime implements Regime {
     planetPosition(EARTH_DATA, clock.seconds, this.sunDir).negate().normalize();
     this.sunLight.position.copy(this.sunDir).multiplyScalar(10);
 
-    // moon orbit
-    const ma = (clock.seconds / MOON_PERIOD_SEC) * Math.PI * 2;
-    this.moonPos.set(Math.cos(ma) * MOON_ORBIT, Math.sin(ma) * 0.2, Math.sin(ma) * MOON_ORBIT);
+    // moon orbit — same tilted-circle form as data/moons.ts moonLocalPosition()
+    const ma = this.moonPhase + (clock.seconds / this.moonPeriodSec) * Math.PI * 2;
+    this.moonPos.set(Math.cos(ma) * this.moonOrbit, Math.sin(ma) * this.moonOrbit * this.moonSinInc, Math.sin(ma) * this.moonOrbit * this.moonCosInc);
     this.moon.position.copy(this.moonPos);
     this.moon.rotation.y = ma; // tidal lock
 
