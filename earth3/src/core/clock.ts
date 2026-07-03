@@ -44,6 +44,18 @@ export class SimClock {
     this.paused = false;
   }
 
+  /** jump to the ladder rung whose rate is closest to `target` (in log space) —
+   *  callers name a PACE ('a month per second'), not a fragile index. */
+  setRateNearest(target: number): void {
+    let best = 0;
+    let bestErr = Infinity;
+    RATE_LADDER.forEach((r, i) => {
+      const err = Math.abs(Math.log(r.rate / target));
+      if (err < bestErr) { bestErr = err; best = i; }
+    });
+    this.setRateIndex(best);
+  }
+
   faster(): void {
     if (this.paused) this.paused = false;
     else this.rateIndex = Math.min(RATE_LADDER.length - 1, this.rateIndex + 1);

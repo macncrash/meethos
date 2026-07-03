@@ -14,6 +14,9 @@ import {
 } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SimClock } from './core/clock';
+import { J2000_UTC_MS, formatUTCDate } from './core/units';
+import type { MissionPlan } from './core/mission';
+import { PLANETS } from './regimes/data/planets';
 import type { FocusTarget } from './core/regime';
 import { ScaleManager } from './world/scaleManager';
 import type { WorldFacade } from './world/facade';
@@ -26,11 +29,16 @@ import { createBackdropStars } from './render/backdrop';
 // The unified single floating-origin frame is now the DEFAULT world. `?legacy`
 // boots the old ScaleManager cross-fade path — kept as an escape hatch until the
 // transition machinery is deleted in a follow-up.
-const LEGACY = new URLSearchParams(window.location.search).has('legacy');
+const PARAMS = new URLSearchParams(window.location.search);
+const LEGACY = PARAMS.has('legacy');
 const UNIFIED = !LEGACY;
+// `?now` anchors the sim to the REAL present: the epoch is J2000, so seconds-since-
+// J2000 puts every planet where it actually is today, tonight's actual sky overhead,
+// and mission windows relative to the real calendar.
+const EPOCH_NOW = PARAMS.has('now');
 // `?capture` keeps the drawing buffer readable so a scripted tour can grab frames off the
 // canvas for the shareable highlight reel (small perf cost, off by default).
-const CAPTURE = new URLSearchParams(window.location.search).has('capture');
+const CAPTURE = PARAMS.has('capture');
 
 const canvas = document.getElementById('stage') as HTMLCanvasElement;
 
@@ -56,6 +64,7 @@ controls.rotateSpeed = 0.55;
 controls.enabled = LEGACY; // the unified frame drives the camera with its own f64 orbit rig
 
 const simClock = new SimClock();
+if (EPOCH_NOW) simClock.seconds = (Date.now() - J2000_UTC_MS) / 1000; // boot at the real present
 const bus = new WorldBus();
 // Build ONLY the active world — the legacy ScaleManager populates the scene and
 // subscribes its regimes to the bus, so constructing it when unified would waste
@@ -230,7 +239,7 @@ function goSearch(e: SearchEntry, observe: boolean): void {
   if (e.constellationId) unified?.showConstellation(e.constellationId); // aim the sky at the figure
   else if (e.target) unified?.goToTarget(e.target, observe);
   // a 92-minute orbit at 1 yr/s is strobing noise — riding a craft needs human-scale time
-  if (e.kind === 'sat' && !simClock.paused && simClock.rate > 3600) simClock.setRateIndex(0);
+  if (e.kind === 'sat' && !simClock.paused && simClock.rate > 60) simClock.setRateNearest(60); // ride at 1 min/s
   closeSearch();
 }
 
@@ -291,6 +300,97 @@ document.getElementById('sky-aim')?.addEventListener('click', () => {
   }
 });
 
+// ---- jump to a specific date: the clock's calendar readout is editable ----
+// Everything is analytic on absolute time (planets, moons, satellites, sidereal sky),
+// so a jump lands every body exactly where it belongs on that date.
+const dateBox = document.getElementById('realdate') as HTMLInputElement | null;
+function jumpToDate(): void {
+  const mres = /^(-?\d{1,6})-(\d{2})-(\d{2})$/.exec(dateBox?.value.trim() ?? '');
+  if (!mres) return;
+  const ms = Date.UTC(Number(mres[1]), Number(mres[2]) - 1, Number(mres[3]), 12);
+  if (!Number.isFinite(ms)) return;
+  simClock.seconds = (ms - J2000_UTC_MS) / 1000;
+  dateBox?.blur();
+}
+dateBox?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') jumpToDate();
+  else if (e.key === 'Escape') dateBox.blur();
+});
+
+// ---- mission planner: pick two worlds → the next REAL launch window ----
+const missionBox = document.getElementById('mission');
+const missionRows = document.getElementById('mission-rows');
+const missionResult = document.getElementById('mission-result');
+let missionPlan: MissionPlan | null = null;
+if (LEGACY) { const b = document.getElementById('missionbtn'); if (b) b.hidden = true; }
+// populate the origin/destination selects (Earth → Mars by default)
+for (const [selId, def] of [['mission-from', 'earth'], ['mission-to', 'mars']] as const) {
+  const sel = document.getElementById(selId) as HTMLSelectElement | null;
+  if (!sel) continue;
+  for (const p of PLANETS) {
+    const o = document.createElement('option');
+    o.value = p.id;
+    o.textContent = p.label;
+    if (p.id === def) o.selected = true;
+    sel.append(o);
+  }
+  sel.addEventListener('change', replan);
+}
+function replan(): void {
+  if (!unified || !missionRows) return;
+  const from = (document.getElementById('mission-from') as HTMLSelectElement | null)?.value ?? 'earth';
+  const to = (document.getElementById('mission-to') as HTMLSelectElement | null)?.value ?? 'mars';
+  missionPlan = unified.planMissionTo(from, to);
+  if (missionResult) missionResult.hidden = true;
+  if (!missionPlan) {
+    missionRows.innerHTML = '<div class="m-row"><span>Pick two different worlds.</span></div>';
+    return;
+  }
+  const p = missionPlan;
+  const row = (k: string, v: string): string => `<div class="m-row"><span>${k}</span><b>${v}</b></div>`;
+  missionRows.innerHTML =
+    row('Next window', formatUTCDate(p.departSeconds)) +
+    row('Travel time', p.transferDays > 1000 ? `${(p.transferDays / 365.25).toFixed(1)} yr` : `${Math.round(p.transferDays)} days`) +
+    row('Arrival', formatUTCDate(p.arriveSeconds)) +
+    row('Δv (depart + arrive)', `${p.dv1Kms.toFixed(2)} + ${p.dv2Kms.toFixed(2)} km/s`) +
+    row('Phase at departure', `${p.phaseReqDeg.toFixed(1)}°`);
+}
+document.getElementById('missionbtn')?.addEventListener('click', () => {
+  if (!missionBox) return;
+  missionBox.hidden = !missionBox.hidden;
+  if (!missionBox.hidden) replan(); // windows are computed from NOW — refresh on open
+});
+document.getElementById('mission-close')?.addEventListener('click', () => {
+  if (missionBox) missionBox.hidden = true;
+  unified?.clearMission(); // closing the planner strikes the arc + ship from the sky
+});
+document.getElementById('mission-show')?.addEventListener('click', () => {
+  if (!unified) return;
+  replan();
+  if (missionPlan) unified.showMission(missionPlan);
+});
+document.getElementById('mission-launch')?.addEventListener('click', () => {
+  if (!unified) return;
+  replan();
+  if (!missionPlan) return;
+  unified.launchMission(missionPlan);
+  if (missionResult) {
+    missionResult.hidden = false;
+    missionResult.innerHTML = `Departed <b>${formatUTCDate(missionPlan.departSeconds)}</b> — coasting…`;
+  }
+});
+if (unified) unified.onMissionArrived = (plan) => {
+  if (missionResult) {
+    missionResult.hidden = false;
+    missionResult.innerHTML = `Arrived at <b>${PLANETS.find((p) => p.id === plan.toId)?.label}</b> — ${formatUTCDate(plan.arriveSeconds)}, ${Math.round(plan.transferDays)} days out.`;
+  }
+  // hand the camera from the ship to the destination it just reached, then strike
+  // the arc + ship (the destination would otherwise orbit away from a stranded dot)
+  const dest = unified.searchIndex().find((e) => e.target?.id === plan.toId)?.target;
+  if (dest) unified.focusOn(dest);
+  unified.clearMission();
+};
+
 // ---- pointer picking (click = focus, double-click = dive) ----
 const raycaster = new Raycaster();
 const pointer = new Vector2();
@@ -325,7 +425,7 @@ canvas.addEventListener('click', (e) => {
   }
   if (target) {
     world.focusOn(target);
-    if (target.id.startsWith('sat-') && !simClock.paused && simClock.rate > 3600) simClock.setRateIndex(0);
+    if (target.id.startsWith('sat-') && !simClock.paused && simClock.rate > 60) simClock.setRateNearest(60); // ride at 1 min/s
     return;
   }
   // no body under the pointer — try the star catalogue (inspect its card, don't fly there)

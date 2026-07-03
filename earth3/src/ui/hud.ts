@@ -185,14 +185,16 @@ export class Hud {
     this.mergerBtn.hidden = !cos.atCosmos || !this.manager.toggleMerger; // absent on the legacy path
 
     this.mergerBtn.classList.toggle('active', !!this.manager.mergerActive);
+    const dateBox = this.realdate as HTMLInputElement;
     if (cos.atCosmos && cos.forming) {
       this.era.textContent = 'COSMIC TIME';
       this.stardate.textContent = `${cos.ageGyr.toFixed(1)} Gyr`;
-      this.realdate.textContent = '';
+      if (document.activeElement !== dateBox) dateBox.value = '';
     } else {
       if (cos.atCosmos) this.era.textContent = this.manager.active.label.toUpperCase();
       this.stardate.textContent = formatStardate(this.clock.seconds);
-      this.realdate.textContent = formatUTCDate(this.clock.seconds); // real calendar (J2000 epoch)
+      // the real calendar (J2000 epoch) — editable: don't fight the user mid-keystroke
+      if (document.activeElement !== dateBox) dateBox.value = formatUTCDate(this.clock.seconds);
     }
     this.rateLabel.textContent = this.clock.rateLabel;
 

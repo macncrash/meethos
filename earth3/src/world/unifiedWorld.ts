@@ -28,6 +28,7 @@ import {
   LineLoop,
   Points,
   PointsMaterial,
+  Quaternion,
   Sphere,
   Sprite,
   SpriteMaterial,
@@ -58,6 +59,7 @@ import { StarCatalog } from './starCatalog';
 import { ConstellationFigures } from './constellationFigures';
 import { MOONS, MOON_COUNTS, KM_PER_AU, moonLocalPosition, type MoonData } from '../data/moons';
 import { OrbitalShell, SAT_SHOW_AU } from './orbitalShell';
+import { planMission, transferArc, shipPosition, type MissionPlan } from '../core/mission';
 import { GalaxyMerger } from './galaxyMerger';
 
 const ORIGIN = new Vector3(0, 0, 0);
@@ -68,6 +70,8 @@ const EARTH_GLOBE_SHOW = 0.03; // AU — within this camera distance, the true-s
 const STAR_SYSTEM_ENTER = 800; // AU — fly this close to a named star and its system materializes
 const COSMIC_WEB_SHOW = 2e10; // AU — beyond this zoom-out the galaxy is one node in the cosmic web
 const OBSERVER_SOLAR_AU = 2000; // AU — within this the Sun/planets show as bodies (kept in sync with starCatalog)
+const GAL_Z = new Vector3(0, 0, 1); // the galaxy spin group's LOCAL Z = galactic north
+const GALACTIC_YEAR_SEC = 230e6 * 365.25 * 86_400; // the Sun's ~230 Myr galactic orbit
 // the city band: the 72-unit SimCity tile sits in its own LOCAL sub-frame as a patch
 // on the globe's pole (scaled so block geometry stays f32-clean, NOT raw AU vertices).
 const CITY_TILE = 72; // SurfaceRegime's tile width in its local units
@@ -133,7 +137,11 @@ function moonInfo(m: MoonData, parentLabel: string): InspectorInfo {
 
 // The Milky Way as a Points cloud in the SAME AU frame — barred spiral at physical
 // size, oriented by the REAL galactic basis, Sun on the Orion arm at R0 ≈ 8.2 kpc.
-function buildGalaxy(): { group: Group; centerWorld: Vector3 } {
+// The disk points live GC-CENTRED in the galactic frame inside a `spin` group, so the
+// galaxy can actually TURN: spin.quaternion = basis ⊗ roll(θ(t)), one revolution per
+// ~230 Myr (the Sun's own galactic period — rigid rotation at the local rate, which
+// keeps the solar neighbourhood co-moving with the static real-star catalogue).
+function buildGalaxy(): { group: Group; centerWorld: Vector3; spin: Group } {
   const N = 34_000;
   const R0 = 8.2 * KPC_AU;
   const DISK = 14 * KPC_AU;
@@ -175,8 +183,9 @@ function buildGalaxy(): { group: Group; centerWorld: Vector3 } {
       ang = rng() * 6.2832;
       h = gaussian(rng) * H;
     }
-    // generate in the galactic basis (disk in X–Y, Z = north), then place by M
-    v.set(Math.cos(ang) * r, Math.sin(ang) * r, h).sub(sunGal).applyMatrix4(M);
+    // keep the point in the galactic frame, centred on the GC — the spin group's
+    // transform (basis ⊗ time-varying roll, positioned at the GC) does the placing
+    v.set(Math.cos(ang) * r, Math.sin(ang) * r, h);
     positions[i * 3] = v.x;
     positions[i * 3 + 1] = v.y;
     positions[i * 3 + 2] = v.z;
@@ -196,13 +205,17 @@ function buildGalaxy(): { group: Group; centerWorld: Vector3 } {
   points.frustumCulled = false;
 
   const group = new Group();
-  group.add(points);
   const centerWorld = new Vector3(0, 0, 0).sub(sunGal).applyMatrix4(M);
+  const spin = new Group();
+  spin.position.copy(centerWorld);
+  spin.quaternion.setFromRotationMatrix(M); // the roll is composed on top each frame
+  spin.add(points);
+  group.add(spin);
   const bulge = new Sprite(new SpriteMaterial({ map: glowTexture(new Color(0xffe2a8)), blending: AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.6 }));
   bulge.scale.setScalar(5 * KPC_AU);
-  bulge.position.copy(centerWorld);
+  bulge.position.copy(centerWorld); // on the rotation axis — no need to spin a sprite
   group.add(bulge);
-  return { group, centerWorld };
+  return { group, centerWorld, spin };
 }
 
 // the real nearest stars (RA/Dec J2000, distance ly, temperature K)
@@ -239,6 +252,9 @@ export class UnifiedWorld implements WorldFacade {
 
   private readonly bodies: Body[] = [];
   private readonly galaxy = buildGalaxy();
+  // the disk's rotation: base orientation ⊗ a roll that advances with sim time
+  private readonly galaxyBaseQ = this.galaxy.spin.quaternion.clone();
+  private readonly galaxyRollQ = new Quaternion();
   private readonly gcBody: Body;
   private readonly rings: { line: LineLoop; label: Sprite; r: number }[];
 
@@ -261,6 +277,15 @@ export class UnifiedWorld implements WorldFacade {
   private readonly moonBodies: { m: MoonData; parent: Body; parentLabel: string; body: Body; target: FocusTarget }[] = [];
   // Layer 6: Earth's orbital shell — named craft + debris clouds (constructed after earthBody)
   private readonly orbitalShell: OrbitalShell;
+  // Layer 8: an active mission — the transfer arc + the ship riding it on sim time
+  private mission: MissionPlan | null = null;
+  private missionArcPts: Vector3[] | null = null;
+  private missionLine: Line | null = null;
+  private missionShip: Sprite | null = null;
+  private readonly missionShipWorld = new Vector3();
+  private missionArrivedFired = false;
+  /** fired once when the ship's time-fraction crosses 1 (the arrival) */
+  onMissionArrived?: (plan: MissionPlan) => void;
   private activeStarName: string | null = null;
 
   // the city — Earth's innermost band: a SimCity tile as a patch on the globe's pole,
@@ -612,6 +637,7 @@ export class UnifiedWorld implements WorldFacade {
     this.mergerMode = !this.mergerMode;
     if (this.mergerMode) {
       this.exitObserver();
+      this.clearMission(); // the merger owns the view — no stale arc/ship
       this.merger.reset();
       this.focusSun();
       this.targetLog = Math.log10(this.merger.frameAu);
@@ -861,6 +887,8 @@ export class UnifiedWorld implements WorldFacade {
     for (let i = 0; i < PLANETS.length; i++) planetPosition(PLANETS[i]!, seconds, this.bodies[i + 1]!.world);
     // moons ride their parents (Luna's identical parameters also drive the regime's mesh)
     for (const mb of this.moonBodies) moonLocalPosition(mb.m, seconds, mb.body.world).add(mb.parent.world);
+    // Layer 8: the mission ship rides its transfer arc on sim time
+    this.updateMission(seconds);
 
     const observer = this.observerGet !== null;
     const dist = 10 ** this.logDist;
@@ -879,6 +907,12 @@ export class UnifiedWorld implements WorldFacade {
         this.focusWorld.z + cp * Math.cos(this.yaw) * dist,
       );
     }
+
+    // the galaxy TURNS — one revolution per ~230 Myr (the Sun's own galactic period;
+    // rigid rotation at the local rate keeps the solar neighbourhood co-moving with
+    // the static real-star catalogue). Clockwise seen from the north galactic pole.
+    this.galaxyRollQ.setFromAxisAngle(GAL_Z, (-2 * Math.PI * seconds) / GALACTIC_YEAR_SEC);
+    this.galaxy.spin.quaternion.copy(this.galaxyBaseQ).multiply(this.galaxyRollQ);
 
     // the galaxy cloud + comet field ride floating origin by translating their groups
     this.galaxy.group.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
@@ -1506,6 +1540,88 @@ export class UnifiedWorld implements WorldFacade {
   /** Show a constellation's real asterism figure on the sky and aim the observer at it.
    *  Enters observer mode from Earth if not already standing somewhere (asterisms are an
    *  Earth-vantage construct). `id` is the IAU 3-letter code. */
+  // ---- Layer 8: mission planner — real windows from the engine's own ephemeris ----
+
+  /** Plan the next Hohmann window between two planets, searching forward from NOW
+   *  (the current sim time). Returns null for a degenerate pair. */
+  planMissionTo(fromId: string, toId: string): MissionPlan | null {
+    const from = PLANETS.find((p) => p.id === fromId);
+    const to = PLANETS.find((p) => p.id === toId);
+    if (!from || !to || from === to) return null;
+    return planMission(from, to, this.clock.seconds);
+  }
+
+  /** Draw the transfer arc + park the (pre-departure) ship, and frame both orbits. */
+  showMission(plan: MissionPlan): void {
+    this.clearMission();
+    const from = PLANETS.find((p) => p.id === plan.fromId)!;
+    const to = PLANETS.find((p) => p.id === plan.toId)!;
+    this.mission = plan;
+    this.missionArcPts = transferArc(from, to, plan);
+    this.missionLine = new Line(
+      new BufferGeometry().setFromPoints(this.missionArcPts),
+      new LineBasicMaterial({ color: 0xffc46a, transparent: true, opacity: 0.9, depthTest: false }),
+    );
+    this.missionLine.renderOrder = 4;
+    this.scene.add(this.missionLine);
+    this.missionShip = this.dot(0.012, new Color(0xffd27a));
+    this.missionShip.renderOrder = 5;
+    // frame the whole transfer from above the ecliptic
+    this.exitObserver();
+    this.mergerMode = false;
+    this.focusSun();
+    this.targetLog = Math.log10(Math.max(from.a, to.a) * 2.6);
+    this.onChange?.();
+  }
+
+  /** Jump the sim to the departure window, put the ship on the arc, ride along.
+   *  Time runs at 1 mo/s so a Mars cruise plays out in ~9 seconds. */
+  launchMission(plan: MissionPlan): void {
+    this.showMission(plan);
+    this.clock.seconds = plan.departSeconds;
+    this.clock.setRateNearest(30 * 86_400); // ~1 mo/s — a Mars cruise plays out in ~9 s
+    shipPosition(this.missionArcPts!, 0, this.missionShipWorld);
+    this.setCameraFocus(() => this.missionShipWorld, 1e-4);
+    const to = PLANETS.find((p) => p.id === plan.toId)!;
+    this.targetLog = Math.log10(Math.max(to.a, 1) * 1.15); // ride with both worlds in frame
+  }
+
+  clearMission(): void {
+    this.mission = null;
+    this.missionArcPts = null;
+    this.missionArrivedFired = false;
+    if (this.missionLine) {
+      this.scene.remove(this.missionLine);
+      this.missionLine.geometry.dispose();
+      (this.missionLine.material as LineBasicMaterial).dispose();
+      this.missionLine = null;
+    }
+    if (this.missionShip) {
+      this.scene.remove(this.missionShip);
+      (this.missionShip.material as SpriteMaterial).dispose();
+      this.missionShip = null;
+    }
+  }
+
+  get missionFraction(): number | null {
+    if (!this.mission) return null;
+    return (this.clock.seconds - this.mission.departSeconds) / (this.mission.arriveSeconds - this.mission.departSeconds);
+  }
+
+  /** per-frame: ride the ship along the arc on sim time; fire the arrival once */
+  private updateMission(seconds: number): void {
+    if (!this.mission || !this.missionArcPts || !this.missionLine || !this.missionShip) return;
+    const f = (seconds - this.mission.departSeconds) / (this.mission.arriveSeconds - this.mission.departSeconds);
+    shipPosition(this.missionArcPts, f, this.missionShipWorld);
+    this.fo.place(this.missionShip, this.missionShipWorld);
+    this.missionShip.visible = f >= 0; // parked at the departure point until the window
+    this.fo.place(this.missionLine, ORIGIN); // heliocentric arc, rebased to the camera
+    if (f >= 1 && !this.missionArrivedFired) {
+      this.missionArrivedFired = true;
+      this.onMissionArrived?.(this.mission);
+    }
+  }
+
   // ---- Layer 7: "what is that?" — a ground vantage + coordinate-aimed identification ----
 
   /** Stand at a latitude/longitude on Earth's surface (~3 km up, so the terrain under

@@ -18,6 +18,8 @@ export const SECONDS_PER_YEAR = 365.25 * SECONDS_PER_DAY;
  * « / » buttons step through this.
  */
 export const RATE_LADDER: ReadonlyArray<{ rate: number; label: string }> = [
+  { rate: 1, label: 'real time' }, // the human timescale — stand outside and look up
+  { rate: 60, label: '1 min/s' },
   { rate: SECONDS_PER_DAY / 24, label: '1 hr/s' },
   { rate: SECONDS_PER_DAY, label: '1 day/s' },
   { rate: SECONDS_PER_DAY * 30, label: '1 mo/s' },
@@ -29,7 +31,7 @@ export const RATE_LADDER: ReadonlyArray<{ rate: number; label: string }> = [
   { rate: SECONDS_PER_YEAR * 1_000_000, label: '1 Myr/s' },
 ];
 
-export const DEFAULT_RATE_INDEX = 3; // 1 yr/s
+export const DEFAULT_RATE_INDEX = 5; // 1 yr/s
 
 /** The sim's epoch is J2000 (2000-01-01 12:00 UTC) — the planets' Keplerian elements
  *  are J2000 with `seconds` as the offset, so the calendar below is REAL: sidereal
