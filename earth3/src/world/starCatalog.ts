@@ -23,6 +23,7 @@ import { dotTexture } from '../render/sprites';
 import { AU_PER_PC, LY_PER_PC, sectorLabel } from '../meethos/units';
 import { STAR_NAMES } from '../data/starNames';
 import starsUrl from '../data/stars.bin?url';
+import starVelUrl from '../data/starVel.bin?url';
 
 const STRIDE = 6; // per star: dirX, dirY, dirZ, distPc, absmag, ci
 const MAG_LIMIT = 6.5; // faintest naked-eye magnitude in the catalog
@@ -84,6 +85,10 @@ export class StarCatalog {
   private distPc?: Float32Array;
   private ciArr?: Float32Array;
   private amagAttr?: BufferAttribute;
+  private posAttr?: BufferAttribute;
+  private basePos?: Float32Array; // J2000 positions — drift displaces from these
+  private vel?: Float32Array; // real space velocities (AU/yr, render frame; HYG pm+rv)
+  private appliedYears = 0;
   private mat?: ShaderMaterial;
   private readonly names = new Map<number, { name: string; con: string }>();
   /** index of the Sun in the catalog — it's the origin star, so from other vantages
@@ -136,7 +141,8 @@ export class StarCatalog {
     this.absmag = absmag;
 
     const geom = new BufferGeometry();
-    geom.setAttribute('position', new BufferAttribute(pos, 3));
+    this.posAttr = new BufferAttribute(pos, 3); // shares this.worldPos — drift updates in place
+    geom.setAttribute('position', this.posAttr);
     geom.setAttribute('acolor', new BufferAttribute(col, 3));
     this.amagAttr = new BufferAttribute(amag, 1);
     geom.setAttribute('amag', this.amagAttr);
@@ -144,6 +150,31 @@ export class StarCatalog {
     const points = new Points(geom, this.mat);
     points.frustumCulled = false;
     this.group.add(points);
+
+    // real space velocities (HYG proper motion + radial velocity), aligned to this
+    // catalogue's order — deep time makes the stars DRIFT and constellations dissolve.
+    this.basePos = pos.slice();
+    try {
+      const vraw = new Float32Array(await (await fetch(starVelUrl)).arrayBuffer());
+      if (vraw.length === n * 3) this.vel = vraw;
+    } catch {
+      // no velocity data — the sky simply stays a J2000 snapshot
+    }
+  }
+
+  /** Displace every star along its real space velocity to `years` after J2000 —
+   *  quantised to 100-yr steps (sub-light-year everywhere, invisible at any zoom).
+   *  Re-projects apparent magnitudes, since the distances changed too. */
+  driftTo(years: number): void {
+    if (!this.vel || !this.basePos || !this.worldPos || !this.posAttr) return;
+    if (Math.abs(years - this.appliedYears) < 100) return;
+    this.appliedYears = years;
+    const pos = this.worldPos;
+    const base = this.basePos;
+    const vel = this.vel;
+    for (let i = 0; i < vel.length; i++) pos[i] = base[i]! + vel[i]! * years;
+    this.posAttr.needsUpdate = true;
+    this.reproject(); // distances changed with the positions
   }
 
   /** overall brightness (0..1) — lets the caller fade the sky by zoom band */
@@ -154,9 +185,16 @@ export class StarCatalog {
   /** re-project apparent magnitudes from a new observer position (AU). This is what
    *  makes the sky correct from anywhere: brightness = absmag + 5·log10(d_obs/10). */
   setObserver(world: Vector3): void {
-    if (!this.worldPos || !this.absmag || !this.amagAttr) return;
     if (world.distanceToSquared(this.observer) < 1e-6) return; // unchanged
     this.observer.copy(world);
+    this.reproject();
+  }
+
+  /** recompute every apparent magnitude from the current observer (called on observer
+   *  moves AND on deep-time drift — either changes the distances). */
+  private reproject(): void {
+    if (!this.worldPos || !this.absmag || !this.amagAttr) return;
+    const world = this.observer;
     const amag = this.amagAttr.array as Float32Array;
     const pos = this.worldPos;
     const abs = this.absmag;
@@ -202,22 +240,26 @@ export class StarCatalog {
     };
   }
 
-  /** Every named catalogue star as a searchable destination (name, constellation and
-   *  distance for ranking, plus a FocusTarget to fly/observe from). Empty until the
-   *  catalogue has loaded. The Sun is excluded — it is already a body pickable. */
-  namedTargets(): Array<{ name: string; con: string; ly: number; target: FocusTarget }> {
-    if (!this.worldPos) return [];
+  /** EVERY catalogue star as a searchable destination — named stars by name, the rest
+   *  by their HYG number, all with their SECTOR as a search alias (type "2, -27" to
+   *  find a neighbourhood). Empty until the catalogue has loaded; Sun excluded. */
+  searchAll(): Array<{ name: string; sub: string; alias: string; target: FocusTarget }> {
+    if (!this.worldPos || !this.distPc || !this.amagAttr) return [];
     const pos = this.worldPos;
-    const out: Array<{ name: string; con: string; ly: number; target: FocusTarget }> = [];
-    for (const [idx, info] of this.names) {
+    const amag = this.amagAttr.array as Float32Array;
+    const out: Array<{ name: string; sub: string; alias: string; target: FocusTarget }> = [];
+    const n = this.distPc.length;
+    for (let idx = 0; idx < n; idx++) {
       if (idx === this.sunIndex) continue;
+      const named = this.names.get(idx);
+      const ly = this.distPc[idx]! * LY_PER_PC;
       out.push({
-        name: info.name,
-        con: info.con,
-        ly: (this.distPc?.[idx] ?? 0) * LY_PER_PC,
+        name: named?.name ?? `HYG ${idx}`,
+        sub: named?.con ? `${ly.toFixed(1)} ly · ${named.con}` : `${ly.toFixed(1)} ly · mag ${amag[idx]!.toFixed(1)}`,
+        alias: sectorLabel(pos[idx * 3]!, pos[idx * 3 + 1]!, pos[idx * 3 + 2]!),
         target: {
           id: `hyg-${idx}`,
-          label: info.name,
+          label: named?.name ?? `HYG ${idx}`,
           radius: 0.25,
           position: (out2) => out2.set(pos[idx * 3]!, pos[idx * 3 + 1]!, pos[idx * 3 + 2]!),
           info: () => this.starCard(idx),

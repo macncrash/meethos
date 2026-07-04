@@ -41,6 +41,7 @@ import type { PlanetData } from '../regimes/data/planets';
 import type { WorldBus } from './bus';
 import type { Breadcrumb, CosmicInfo, WorldFacade } from './facade';
 import { blackbodyColor } from '../core/color';
+import { SECONDS_PER_YEAR } from '../core/units';
 import { mulberry32, gaussian } from '../core/rng';
 import { dotTexture, glowTexture } from '../render/sprites';
 import { makeLabel } from '../render/label';
@@ -239,6 +240,7 @@ export interface SearchEntry {
   name: string;
   kind: 'planet' | 'moon' | 'sat' | 'star' | 'galaxy' | 'constellation';
   sub?: string; // secondary line, e.g. "8.6 ly · Canis Major"
+  alias?: string; // a second searchable key (a star's sector: type "2, -27" for a neighbourhood)
   target?: FocusTarget; // a place to fly to (bodies/stars/galaxies)
   constellationId?: string; // a sky figure to aim at instead (IAU code)
 }
@@ -891,6 +893,10 @@ export class UnifiedWorld implements WorldFacade {
     for (const mb of this.moonBodies) moonLocalPosition(mb.m, seconds, mb.body.world).add(mb.parent.world);
     // Layer 8: the mission ship rides its transfer arc on sim time
     this.updateMission(seconds);
+    // deep time: the stars themselves drift along their real HYG space velocities —
+    // scrub megayears and the constellations dissolve, as they truly will. (The 14
+    // hand-placed divable stars stay put: they anchor star systems and game targets.)
+    this.starCatalog.driftTo(seconds / SECONDS_PER_YEAR);
 
     const observer = this.observerGet !== null;
     const dist = 10 ** this.logDist;
@@ -1291,10 +1297,13 @@ export class UnifiedWorld implements WorldFacade {
     for (const t of this.orbitalShell.activeShellTargets(this.clock.seconds)) out.push({ name: t.label, kind: 'sat', sub: 'debris field', target: t });
     for (const g of this.cosmicWeb.searchTargets()) out.push({ name: g.label, kind: 'galaxy', target: g });
     const seen = new Set(out.map((e) => e.name.toLowerCase()));
-    for (const s of this.starCatalog.namedTargets()) {
+    // the WHOLE catalogue — all ~8,900 naked-eye stars, named or 'HYG n', each with its
+    // sector as a search alias. The palette only ever shows the top matches, so the
+    // index being big is fine; the label clutter question lives elsewhere.
+    for (const s of this.starCatalog.searchAll()) {
       if (seen.has(s.name.toLowerCase())) continue;
       seen.add(s.name.toLowerCase());
-      out.push({ name: s.name, kind: 'star', sub: `${s.ly.toFixed(1)} ly · ${s.con}`, target: s.target });
+      out.push({ name: s.name, kind: 'star', sub: s.sub, alias: s.alias, target: s.target });
     }
     // constellations: aim the sky at the real asterism figure, from Earth
     for (const c of this.constellations.list()) {

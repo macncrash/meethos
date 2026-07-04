@@ -189,6 +189,14 @@ function matchScore(name: string, q: string): number {
   return at >= 0 ? 40 - at * 0.1 : 0;
 }
 
+// an entry matches on its name, or (slightly discounted) on its alias — a star's
+// sector coordinates, so "2, -27" surfaces a stellar neighbourhood
+function entryScore(e: SearchEntry, q: string): number {
+  const byName = matchScore(e.name.toLowerCase(), q);
+  const byAlias = e.alias ? matchScore(e.alias.toLowerCase(), q) * 0.8 : 0;
+  return Math.max(byName, byAlias);
+}
+
 function renderSearchResults(): void {
   if (!searchResults) return;
   if (searchHits.length === 0) {
@@ -213,7 +221,7 @@ function runSearch(): void {
     searchHits = SEARCH_DEFAULTS.map((n) => searchAll.find((e) => e.name === n)).filter((e): e is SearchEntry => !!e);
   } else {
     searchHits = searchAll
-      .map((e) => ({ e, s: matchScore(e.name.toLowerCase(), q) }))
+      .map((e) => ({ e, s: entryScore(e, q) }))
       .filter((x) => x.s > 0)
       .sort((a, b) => b.s - a.s)
       .slice(0, 9)
