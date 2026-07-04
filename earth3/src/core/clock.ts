@@ -12,14 +12,19 @@ export class SimClock {
    *  at a steady pace regardless of the sim time-rate (impact flashes, etc.) */
   realDt = 0;
   paused = false;
+  /** +1 = forward, −1 = REWIND — everything analytic (orbits, sidereal sky, star drift,
+   *  satellite launch gating) runs backwards exactly; incremental sims (civilization,
+   *  game clock) clamp at zero and simply hold during rewind. */
+  direction: 1 | -1 = 1;
   private rateIndex = DEFAULT_RATE_INDEX;
 
   get rate(): number {
-    return RATE_LADDER[this.rateIndex]!.rate;
+    return RATE_LADDER[this.rateIndex]!.rate * this.direction;
   }
 
   get rateLabel(): string {
-    return this.paused ? 'paused' : RATE_LADDER[this.rateIndex]!.label;
+    if (this.paused) return 'paused';
+    return (this.direction < 0 ? '−' : '') + RATE_LADDER[this.rateIndex]!.label;
   }
 
   get years(): number {
@@ -38,9 +43,11 @@ export class SimClock {
     this.paused = !this.paused;
   }
 
-  /** jump to a specific rung of the ladder (used to set a good pace for the game) */
+  /** jump to a specific rung of the ladder (used to set a good pace for the game).
+   *  Always lands running FORWARD — callers here are game/mission setups. */
   setRateIndex(i: number): void {
     this.rateIndex = Math.max(0, Math.min(RATE_LADDER.length - 1, i));
+    this.direction = 1;
     this.paused = false;
   }
 
@@ -56,13 +63,35 @@ export class SimClock {
     this.setRateIndex(best);
   }
 
+  /** » — move the rate toward +∞: rewinding decelerates (and flips forward past the
+   *  slowest rung); running forward accelerates. The transport is one signed throttle. */
+  stepUp(): void {
+    if (this.paused) { this.paused = false; return; }
+    if (this.direction < 0) {
+      if (this.rateIndex === 0) this.direction = 1;
+      else this.rateIndex--;
+    } else {
+      this.rateIndex = Math.min(RATE_LADDER.length - 1, this.rateIndex + 1);
+    }
+  }
+
+  /** « — move the rate toward −∞: forward decelerates, and past the slowest rung time
+   *  REVERSES; already rewinding, it rewinds faster. */
+  stepDown(): void {
+    if (this.paused) { this.paused = false; return; }
+    if (this.direction > 0) {
+      if (this.rateIndex === 0) this.direction = -1;
+      else this.rateIndex--;
+    } else {
+      this.rateIndex = Math.min(RATE_LADDER.length - 1, this.rateIndex + 1);
+    }
+  }
+
   faster(): void {
-    if (this.paused) this.paused = false;
-    else this.rateIndex = Math.min(RATE_LADDER.length - 1, this.rateIndex + 1);
+    this.stepUp();
   }
 
   slower(): void {
-    if (this.paused) this.paused = false;
-    else this.rateIndex = Math.max(0, this.rateIndex - 1);
+    this.stepDown();
   }
 }

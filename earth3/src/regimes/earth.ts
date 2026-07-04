@@ -212,8 +212,9 @@ export class EarthRegime implements Regime {
   }
 
   step(clock: SimClock): void {
-    // civilization advances in sim-years, bounded so cosmic rates stay cheap
-    const years = Math.min(clock.dt / (SECONDS_PER_DAY * 365.25), MAX_CIV_YEARS_PER_FRAME);
+    // civilization advances in sim-years, bounded so cosmic rates stay cheap; it can't
+    // UN-grow — during a timeline rewind it simply holds (the sky rewinds, cities stay)
+    const years = Math.max(0, Math.min(clock.dt / (SECONDS_PER_DAY * 365.25), MAX_CIV_YEARS_PER_FRAME));
     this.civ.advance(years);
 
     this.animateShocks(clock.realDt);

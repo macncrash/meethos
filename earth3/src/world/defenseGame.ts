@@ -94,7 +94,7 @@ export class DefenseGame {
 
   update(clock: SimClock): void {
     if (this.state !== 'playing') return;
-    const dy = clock.dt / SECONDS_PER_YEAR;
+    const dy = Math.max(0, clock.dt / SECONDS_PER_YEAR); // the game clock only counts forward
     this.survivedYears += dy;
     this.cooldown = Math.max(0, this.cooldown - dy);
     this.health = Math.min(100, this.health + REGEN_PER_YEAR * dy);

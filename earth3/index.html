@@ -109,13 +109,13 @@
       <div id="clock">
         <span id="era" class="era">—</span>
         <span id="stardate" class="stardate" title="Elapsed sim time — Day 0 is the J2000 epoch (2000-01-01), not the Big Bang">—</span>
-        <input id="realdate" class="realdate" title="Real calendar (epoch J2000) — type a date, Enter to jump there" spellcheck="false" />
+        <input id="realdate" class="realdate" title="Real calendar (epoch J2000) — type a date (2049-07-20), a year (1969, -10000), Enter to jump" spellcheck="false" />
       </div>
       <div id="transport">
         <button data-rate="pause" title="Pause">❚❚</button>
-        <button data-rate="slower" title="Slower">«</button>
+        <button data-rate="slower" title="Slower — keep pressing past the slowest and time runs BACKWARDS">«</button>
         <span id="rate-label">1×</span>
-        <button data-rate="faster" title="Faster">»</button>
+        <button data-rate="faster" title="Faster (while rewinding: slows the rewind, then forward)">»</button>
       </div>
       <button id="bigbang-btn" title="Rewind to the Big Bang and watch the cosmic web form" hidden>✦ Big Bang</button>
       <button id="merger-btn" title="Fast-forward the Milky Way × Andromeda collision (~4.5 Gyr)" hidden>⟳ Andromeda Merger</button>

@@ -14,7 +14,7 @@ import {
 } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SimClock } from './core/clock';
-import { J2000_UTC_MS, formatUTCDate } from './core/units';
+import { J2000_UTC_MS, SECONDS_PER_YEAR, formatUTCDate } from './core/units';
 import type { MissionPlan } from './core/mission';
 import { PLANETS } from './regimes/data/planets';
 import type { FocusTarget } from './core/regime';
@@ -313,11 +313,21 @@ document.getElementById('sky-aim')?.addEventListener('click', () => {
 // so a jump lands every body exactly where it belongs on that date.
 const dateBox = document.getElementById('realdate') as HTMLInputElement | null;
 function jumpToDate(): void {
-  const mres = /^(-?\d{1,6})-(\d{2})-(\d{2})$/.exec(dateBox?.value.trim() ?? '');
+  // "2049-07-20", "1969-07", or a bare (possibly negative) year: "1969", "-10000"
+  const mres = /^(-?\d{1,9})(?:-(\d{1,2}))?(?:-(\d{1,2}))?$/.exec(dateBox?.value.trim() ?? '');
   if (!mres) return;
-  const ms = Date.UTC(Number(mres[1]), Number(mres[2]) - 1, Number(mres[3]), 12);
-  if (!Number.isFinite(ms)) return;
-  simClock.seconds = (ms - J2000_UTC_MS) / 1000;
+  const year = Number(mres[1]);
+  if (Math.abs(year - 2000) > 200_000) {
+    // beyond the calendar's reach: land on the year at year-scale precision
+    simClock.seconds = (year - 2000) * SECONDS_PER_YEAR;
+  } else {
+    // setUTCFullYear sidesteps Date.UTC's two-digit-year trap (33 CE, not 1933)
+    const d = new Date(0);
+    d.setUTCFullYear(year, Number(mres[2] ?? 1) - 1, Number(mres[3] ?? 1));
+    d.setUTCHours(12, 0, 0, 0);
+    if (!Number.isFinite(d.getTime())) return;
+    simClock.seconds = (d.getTime() - J2000_UTC_MS) / 1000;
+  }
   dateBox?.blur();
 }
 dateBox?.addEventListener('keydown', (e) => {

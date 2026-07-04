@@ -42,19 +42,27 @@ export const J2000_UTC_MS = Date.UTC(2000, 0, 1, 12, 0, 0);
  *  JS Date holds ±275 kyr; beyond that the calendar is meaningless anyway. */
 export function formatUTCDate(seconds: number): string {
   const years = seconds / SECONDS_PER_YEAR;
-  if (Math.abs(years) > 200_000) return `${Math.round(2000 + years).toLocaleString()} CE`;
-  const d = new Date(J2000_UTC_MS + seconds * 1000);
-  return d.toISOString().slice(0, 10);
+  if (Math.abs(years) > 200_000) {
+    const y = Math.round(2000 + years);
+    return y >= 0 ? `${y.toLocaleString()} CE` : `${Math.abs(y).toLocaleString()} BCE`;
+  }
+  // slice at the 'T': BCE / 5-digit years serialize as extended ISO (±YYYYYY-…),
+  // where a fixed 10-char cut would truncate the day
+  const iso = new Date(J2000_UTC_MS + seconds * 1000).toISOString();
+  return iso.slice(0, iso.indexOf('T'));
 }
 
-/** Format simulated elapsed time adaptively: days → years → kyr → Myr. */
+/** Format simulated elapsed time adaptively: days → years → kyr → Myr.
+ *  Negative time (rewound past the epoch) reads the same way, signed. */
 export function formatStardate(seconds: number): string {
   const years = seconds / SECONDS_PER_YEAR;
-  if (years < 2) {
-    const days = Math.floor(seconds / SECONDS_PER_DAY);
-    return `Day ${days.toLocaleString()}`;
+  const sign = seconds < 0 ? '−' : '';
+  const ay = Math.abs(years);
+  if (ay < 2) {
+    const days = Math.floor(Math.abs(seconds) / SECONDS_PER_DAY);
+    return `Day ${sign}${days.toLocaleString()}`;
   }
-  if (years < 10_000) return `Year ${Math.floor(years).toLocaleString()}`;
-  if (years < 1_000_000) return `${(years / 1_000).toFixed(1)} kyr`;
-  return `${(years / 1_000_000).toFixed(2)} Myr`;
+  if (ay < 10_000) return `Year ${sign}${Math.floor(ay).toLocaleString()}`;
+  if (ay < 1_000_000) return `${sign}${(ay / 1_000).toFixed(1)} kyr`;
+  return `${sign}${(ay / 1_000_000).toFixed(2)} Myr`;
 }
