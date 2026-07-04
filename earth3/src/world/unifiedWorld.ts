@@ -61,6 +61,7 @@ import { ConstellationFigures } from './constellationFigures';
 import { MOONS, MOON_COUNTS, KM_PER_AU, moonLocalPosition, type MoonData } from '../data/moons';
 import { OrbitalShell, SAT_SHOW_AU } from './orbitalShell';
 import { planMission, transferArc, shipPosition, type MissionPlan } from '../core/mission';
+import { PlanetSurfaces } from './planetSurfaces';
 import { GalaxyMerger } from './galaxyMerger';
 
 const ORIGIN = new Vector3(0, 0, 0);
@@ -279,6 +280,12 @@ export class UnifiedWorld implements WorldFacade {
   private readonly moonBodies: { m: MoonData; parent: Body; parentLabel: string; body: Body; target: FocusTarget }[] = [];
   // Layer 6: Earth's orbital shell — named craft + debris clouds (constructed after earthBody)
   private readonly orbitalShell: OrbitalShell;
+  // true-scale lit globes for planets + major moons (Earth/Luna keep their regime meshes)
+  private readonly surfaces = new PlanetSurfaces();
+  private readonly surfaceBodies = new Map<string, Body>(); // globe id → its marker body
+  private readonly surfPosTmp = new Vector3();
+  private readonly surfSunTmp = new Vector3();
+  private readonly surfParTmp = new Vector3();
   // Layer 8: an active mission — the transfer arc + the ship riding it on sim time
   private mission: MissionPlan | null = null;
   private missionArcPts: Vector3[] | null = null;
@@ -352,8 +359,10 @@ export class UnifiedWorld implements WorldFacade {
   // that world point and free-looks (yaw/pitch = look direction, wheel = fov), and the
   // star catalog re-projects apparent magnitudes from there. null = normal orbit mode.
   private observerGet: (() => Vector3) | null = null;
+  private observerUp: (() => Vector3) | null = null; // local zenith for SURFACE vantages (levels the horizon)
   private observerLabel = '';
   private readonly observerWorld = new Vector3();
+  private readonly observerUpTmp = new Vector3();
   private fov = 55;
 
   // screen-space label declutter: each label sprite with a static priority; every
@@ -381,7 +390,6 @@ export class UnifiedWorld implements WorldFacade {
   private lastBandId = '';
   onChange?: () => void;
   private readonly focusGetTmp = new Vector3();
-  private readonly goToTmp = new Vector3();
   private readonly groundTmp = new Vector3(); // ground-observer position scratch
   private readonly idTmp = new Vector3(); // sky-identification scratch
   private readonly pickWorld = new Vector3();
@@ -460,6 +468,25 @@ export class UnifiedWorld implements WorldFacade {
     // Earth-centred; the group is placed at Earth's camera-relative position each frame
     this.orbitalShell = new OrbitalShell(() => this.earthBody.world);
     scene.add(this.orbitalShell.group);
+
+    // true-scale textured globes for every planet (Earth keeps its living regime globe)
+    // and major moon (Luna keeps the regime's mesh) — "what does Mars LOOK like"
+    const auR = (km: number): number => (km * 1000) / AU_M;
+    PLANETS.forEach((p, i) => {
+      if (p.id === 'earth') return;
+      const body = this.bodies[i + 1]!;
+      const ring = p.id === 'saturn'
+        ? { innerR: auR(74_500), outerR: auR(136_780), tiltDeg: p.obliquityDeg }
+        : undefined;
+      this.surfaces.add(p.id, auR(p.radiusKm), body.world, null, p.rotationHours, p.color, ring);
+      this.surfaceBodies.set(p.id, body);
+    });
+    for (const mb of this.moonBodies) {
+      if (mb.m.id === 'luna') continue;
+      this.surfaces.add(mb.m.id, auR(mb.m.radiusKm), mb.body.world, mb.parent.world, mb.m.periodDays * 24, mb.m.color);
+      this.surfaceBodies.set(mb.m.id, mb.body);
+    }
+    scene.add(this.surfaces.group);
 
     // comets ride a group rebased by -camWorld each frame; they home on Earth's
     // absolute heliocentric position and emit ImpactEvents the EarthRegime consumes.
@@ -615,6 +642,7 @@ export class UnifiedWorld implements WorldFacade {
     this.earth.object3d.visible = false;
     this.surface.object3d.visible = false;
     this.orbitalShell.group.visible = false;
+    this.surfaces.setAllHidden();
     for (const b of this.bodies) { b.dot.visible = false; b.label.visible = false; }
     for (const ring of this.rings) { ring.line.visible = false; ring.label.visible = false; }
     if (this.orbitLine) this.orbitLine.visible = false;
@@ -1071,6 +1099,15 @@ export class UnifiedWorld implements WorldFacade {
       }
     }
 
+    // true-scale globes: show near their bodies, spin, aim the shared sun light; when a
+    // globe is up, its marker dot hands off to the mesh (the Earth-globe pattern)
+    this.surfaces.update(this.fo, this.fo.camWorld, seconds);
+    for (const e of this.surfaces.entries) {
+      if (!e.visible) continue;
+      const body = this.surfaceBodies.get(e.id);
+      if (body) { body.dot.visible = false; body.label.visible = false; }
+    }
+
     // notify the HUD when the band changes so it rebuilds the breadcrumb/era
     const band = this.currentBandId();
     if (band !== this.lastBandId) {
@@ -1082,6 +1119,10 @@ export class UnifiedWorld implements WorldFacade {
     if (observer) {
       // free-look: yaw/pitch is the LOOK direction. Negated to match orbit mode's look
       // vector (focus − camWorld) so vertical drag feels the same across a 'v' toggle.
+      // Standing on a surface, "up" is the LOCAL ZENITH — the horizon stays level and
+      // the ground stays underfoot; floating in space keeps world-Y.
+      if (this.observerUp) this.camera.up.copy(this.observerUp());
+      else this.camera.up.set(0, 1, 0);
       this.camera.lookAt(-cp * Math.sin(this.yaw), -Math.sin(this.pitch), -cp * Math.cos(this.yaw));
       this.camera.fov = this.fov;
       // near = 150 m: a GROUND observer stands ~3 km above the mesh and needs the
@@ -1091,6 +1132,7 @@ export class UnifiedWorld implements WorldFacade {
       this.camera.near = 1e-9;
       this.camera.far = 1e14;
     } else {
+      this.camera.up.set(0, 1, 0); // orbit mode is always world-Y-up
       this.camera.lookAt(this.fo.rel(this.focusWorld, this.tmp));
       this.camera.fov = 55;
       this.camera.near = Math.max(dist * 1e-4, 1e-6);
@@ -1324,7 +1366,7 @@ export class UnifiedWorld implements WorldFacade {
     this.flyActive = false;
     this.selectedTarget = null;
     if (observe) {
-      this.viewFrom(() => target.position(this.goToTmp), target.label);
+      this.viewFromBody(target); // surface-stand when the body has a true-scale globe
       return;
     }
     this.startFlyTo(target, fromObserver);
@@ -1529,25 +1571,70 @@ export class UnifiedWorld implements WorldFacade {
 
   /** enter observer mode at a moving world point (a body/star). Free-look with drag,
    *  zoom the FOV with the wheel; the sky's apparent magnitudes re-project from here. */
-  viewFrom(get: () => Vector3, label = 'here'): void {
+  viewFrom(get: () => Vector3, label = 'here', up: (() => Vector3) | null = null): void {
     this.cancelFlyTo(); // observer supersedes a flight — but restore focusGet so exiting isn't stale
     this.constellations.setActive(null); // a body-sky view clears any constellation figure
     this.observerGet = get;
+    this.observerUp = up; // surface vantages pass their local zenith — the horizon stays level
     this.observerLabel = label;
     this.fov = 55;
     this.onChange?.();
   }
 
+  /** Observe from a body — ON ITS SURFACE when it has a true-scale globe: you stand at
+   *  ~R above the ground on the side where BOTH the Sun and the parent are up (on Europa
+   *  that's daylight ice with Jupiter hanging overhead), aimed at the parent on arrival.
+   *  Bodies without globes (catalogue stars, craft, Earth/Luna's regime meshes) keep the
+   *  classic at-the-body vantage. */
+  viewFromBody(target: FocusTarget): void {
+    const e = this.surfaces.byId(target.id);
+    if (!e) {
+      this.viewFrom(() => target.position(this.focusGetTmp), target.label);
+      return;
+    }
+    const standDir = (): Vector3 => {
+      const c = target.position(this.surfPosTmp);
+      const toSun = this.surfSunTmp.copy(c).multiplyScalar(-1).normalize();
+      const toParent = e.parentWorld
+        ? this.surfParTmp.copy(e.parentWorld).sub(c).normalize()
+        : this.surfParTmp.copy(toSun);
+      const dir = toSun.add(toParent); // bisector: both lights of the sky above the horizon
+      return dir.lengthSq() < 1e-6 ? this.surfParTmp.copy(c).multiplyScalar(-1).normalize() : dir.normalize();
+    };
+    const get = (): Vector3 => {
+      const dir = standDir();
+      const c = target.position(this.surfPosTmp); // standDir used the scratch — re-read
+      return c.addScaledVector(dir, e.radiusAU + Math.max(e.radiusAU * 8e-4, 2e-9)); // ≥300 m up
+    };
+    this.viewFrom(get, target.label, () => standDir().clone());
+    // arrival aim: toward the parent's AZIMUTH (the Sun's, for a planet), lifted just
+    // above the horizon — the ground fills the lower frame, the sky object the upper
+    const zen = standDir().clone();
+    const c = target.position(this.surfPosTmp);
+    const aimAt = e.parentWorld ? this.surfParTmp.copy(e.parentWorld) : this.surfParTmp.set(0, 0, 0);
+    const toAim = aimAt.sub(c).normalize();
+    const horiz = toAim.clone().addScaledVector(zen, -toAim.dot(zen));
+    if (horiz.lengthSq() < 1e-9) horiz.set(zen.z, 0, -zen.x); // aim is at zenith — any horizon dir
+    horiz.normalize();
+    // look HALFWAY up to the target's elevation: the ground fills the lower frame and
+    // the parent sits symmetrically above, whatever the orbital geometry put it at
+    const elTarget = Math.asin(Math.max(-1, Math.min(1, toAim.dot(zen))));
+    const EL = Math.max(0.12, elTarget / 2);
+    const look = horiz.multiplyScalar(Math.cos(EL)).addScaledVector(zen, Math.sin(EL)).normalize();
+    this.yaw = Math.atan2(-look.x, -look.z);
+    this.pitch = Math.max(-1.55, Math.min(1.55, Math.asin(Math.max(-1, Math.min(1, -look.y)))));
+  }
+
   /** view the sky from the currently focused body (the 'v' key) */
   viewFromFocus(): void {
-    const t = this.focusTarget;
-    this.viewFrom(() => t.position(this.focusGetTmp), t.label);
+    this.viewFromBody(this.focusTarget);
   }
 
   /** leave observer mode, back to orbit; reset the sky to the from-Earth catalogue. */
   exitObserver(): void {
     if (!this.observerGet) return;
     this.observerGet = null;
+    this.observerUp = null;
     this.starCatalog.setObserver(ORIGIN);
     this.constellations.setActive(null); // leaving the sky hides any constellation figure
     this.onChange?.();
@@ -1648,9 +1735,10 @@ export class UnifiedWorld implements WorldFacade {
       groundDir(latDeg, lonDeg, this.clock.seconds, this.groundTmp)
         .multiplyScalar(EARTH_RADIUS_AU * 1.0005)
         .add(this.earthBody.world);
+    const up = (): Vector3 => groundDir(latDeg, lonDeg, this.clock.seconds, this.observerUpTmp);
     const ns = latDeg >= 0 ? 'N' : 'S';
     const ew = lonDeg >= 0 ? 'E' : 'W';
-    this.viewFrom(get, `${Math.abs(latDeg).toFixed(1)}°${ns} ${Math.abs(lonDeg).toFixed(1)}°${ew}`);
+    this.viewFrom(get, `${Math.abs(latDeg).toFixed(1)}°${ns} ${Math.abs(lonDeg).toFixed(1)}°${ew}`, up);
   }
 
   /** A sky direction (render frame) for an Alt/Az or RA/Dec query. RA in HOURS. */
