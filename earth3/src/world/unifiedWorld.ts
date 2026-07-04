@@ -70,7 +70,6 @@ const EARTH_GLOBE_SHOW = 0.03; // AU — within this camera distance, the true-s
 const STAR_SYSTEM_ENTER = 800; // AU — fly this close to a named star and its system materializes
 const COSMIC_WEB_SHOW = 2e10; // AU — beyond this zoom-out the galaxy is one node in the cosmic web
 const OBSERVER_SOLAR_AU = 2000; // AU — within this the Sun/planets show as bodies (kept in sync with starCatalog)
-const GAL_Z = new Vector3(0, 0, 1); // the galaxy spin group's LOCAL Z = galactic north
 const GALACTIC_YEAR_SEC = 230e6 * 365.25 * 86_400; // the Sun's ~230 Myr galactic orbit
 // the city band: the 72-unit SimCity tile sits in its own LOCAL sub-frame as a patch
 // on the globe's pole (scaled so block geometry stays f32-clean, NOT raw AU vertices).
@@ -207,14 +206,13 @@ function buildGalaxy(): { group: Group; centerWorld: Vector3; spin: Group } {
   const group = new Group();
   const centerWorld = new Vector3(0, 0, 0).sub(sunGal).applyMatrix4(M);
   const spin = new Group();
-  spin.position.copy(centerWorld);
+  spin.position.copy(centerWorld); // update() REVOLVES this about the origin too
   spin.quaternion.setFromRotationMatrix(M); // the roll is composed on top each frame
   spin.add(points);
   group.add(spin);
   const bulge = new Sprite(new SpriteMaterial({ map: glowTexture(new Color(0xffe2a8)), blending: AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.6 }));
   bulge.scale.setScalar(5 * KPC_AU);
-  bulge.position.copy(centerWorld); // on the rotation axis — no need to spin a sprite
-  group.add(bulge);
+  spin.add(bulge); // at the spin group's local origin = the GC — follows the revolution
   return { group, centerWorld, spin };
 }
 
@@ -252,9 +250,11 @@ export class UnifiedWorld implements WorldFacade {
 
   private readonly bodies: Body[] = [];
   private readonly galaxy = buildGalaxy();
-  // the disk's rotation: base orientation ⊗ a roll that advances with sim time
+  // the disk's rotation: a world-frame roll about the galactic-north axis THROUGH THE
+  // ORIGIN (the Sun co-rotates), composed with the base orientation each frame
   private readonly galaxyBaseQ = this.galaxy.spin.quaternion.clone();
   private readonly galaxyRollQ = new Quaternion();
+  private readonly galNorthRender = new Vector3().setFromMatrixColumn(galacticBasis(), 2);
   private readonly gcBody: Body;
   private readonly rings: { line: LineLoop; label: Sprite; r: number }[];
 
@@ -413,8 +413,10 @@ export class UnifiedWorld implements WorldFacade {
       this.addBody(world, s.name, blackbodyColor(s.k, c).clone(), 'star', s.k > 7000 ? 0.016 : 0.011);
       this.starBodies.push({ body: this.bodies[this.bodies.length - 1]!, name: s.name });
     }
-    // the Galactic Centre marker (rides the cloud's bulge)
-    this.addBody(this.galaxy.centerWorld, 'Galactic Centre', new Color(0xffe6b0), 'star', 0.02);
+    // the Galactic Centre marker (rides the cloud's bulge). A CLONE: the marker
+    // revolves with the galaxy every frame (see update()) — mutating the shared
+    // centerWorld base vector would compound the rotation.
+    this.addBody(this.galaxy.centerWorld.clone(), 'Galactic Centre', new Color(0xffe6b0), 'star', 0.02);
     this.gcBody = this.bodies[this.bodies.length - 1]!;
 
     // the Earth band: reuse the full EarthRegime (lit globe + Moon + civilization +
@@ -908,11 +910,16 @@ export class UnifiedWorld implements WorldFacade {
       );
     }
 
-    // the galaxy TURNS — one revolution per ~230 Myr (the Sun's own galactic period;
-    // rigid rotation at the local rate keeps the solar neighbourhood co-moving with
-    // the static real-star catalogue). Clockwise seen from the north galactic pole.
-    this.galaxyRollQ.setFromAxisAngle(GAL_Z, (-2 * Math.PI * seconds) / GALACTIC_YEAR_SEC);
-    this.galaxy.spin.quaternion.copy(this.galaxyBaseQ).multiply(this.galaxyRollQ);
+    // the galaxy TURNS — one revolution per ~230 Myr (the Sun's own galactic period).
+    // The Sun CO-ROTATES: in this Sun-anchored frame, rigid co-rotation means the whole
+    // assembly — disk AND the Galactic Centre itself — revolves about the ORIGIN, so
+    // the Sun keeps its place on its arm while Sgr A*'s direction sweeps the sky, as it
+    // really does over megayears. (A GC-pivoted spin would slide the disk PAST the Sun.)
+    const rollAngle = (-2 * Math.PI * seconds) / GALACTIC_YEAR_SEC;
+    this.galaxyRollQ.setFromAxisAngle(this.galNorthRender, rollAngle);
+    this.galaxy.spin.position.copy(this.galaxy.centerWorld).applyQuaternion(this.galaxyRollQ);
+    this.galaxy.spin.quaternion.copy(this.galaxyRollQ).multiply(this.galaxyBaseQ);
+    this.gcBody.world.copy(this.galaxy.spin.position); // the GC marker rides along
 
     // the galaxy cloud + comet field ride floating origin by translating their groups
     this.galaxy.group.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
@@ -949,7 +956,7 @@ export class UnifiedWorld implements WorldFacade {
     // Layer 6: the orbital shell rides Earth — debris clouds fade in on approach,
     // named-craft dots closer (setVisibility's two bands)
     this.orbitalShell.step(seconds, this.clock.dt);
-    this.orbitalShell.setVisibility(earthCamDist);
+    this.orbitalShell.setVisibility(earthCamDist, seconds);
     if (this.orbitalShell.group.visible) this.fo.place(this.orbitalShell.group, earthWorld);
 
     // reference rings (centred on the Sun = origin), fading by zoom band
@@ -1280,8 +1287,8 @@ export class UnifiedWorld implements WorldFacade {
     for (const mb of this.moonBodies) {
       out.push({ name: mb.m.label, kind: 'moon', sub: `moon of ${mb.parentLabel}`, target: mb.target });
     }
-    for (const t of this.orbitalShell.craftTargets()) out.push({ name: t.label, kind: 'sat', sub: 'Earth orbit', target: t });
-    for (const t of this.orbitalShell.shellTargets()) out.push({ name: t.label, kind: 'sat', sub: 'debris field', target: t });
+    for (const t of this.orbitalShell.activeCraftTargets(this.clock.seconds)) out.push({ name: t.label, kind: 'sat', sub: 'Earth orbit', target: t });
+    for (const t of this.orbitalShell.activeShellTargets(this.clock.seconds)) out.push({ name: t.label, kind: 'sat', sub: 'debris field', target: t });
     for (const g of this.cosmicWeb.searchTargets()) out.push({ name: g.label, kind: 'galaxy', target: g });
     const seen = new Set(out.map((e) => e.name.toLowerCase()));
     for (const s of this.starCatalog.namedTargets()) {
@@ -1420,7 +1427,7 @@ export class UnifiedWorld implements WorldFacade {
       if (mb.parent.world.distanceTo(this.fo.camWorld) < (mb.m.aKm / KM_PER_AU) * 50) out.push(mb.target);
     }
     // named spacecraft: pickable only when their dots are shown (near Earth)
-    if (this.earthBody.world.distanceTo(this.fo.camWorld) < SAT_SHOW_AU) out.push(...this.orbitalShell.craftTargets());
+    if (this.earthBody.world.distanceTo(this.fo.camWorld) < SAT_SHOW_AU) out.push(...this.orbitalShell.activeCraftTargets(this.clock.seconds));
     if (!this.activeStarName) return out;
     const star = this.starBodies.find((s) => s.name === this.activeStarName);
     if (!star) return out;
@@ -1663,7 +1670,7 @@ export class UnifiedWorld implements WorldFacade {
     };
     for (const t of this.pickables) consider(t);
     for (const mb of this.moonBodies) consider(mb.target);
-    if (this.earthBody.world.distanceTo(from) < SAT_SHOW_AU) for (const t of this.orbitalShell.craftTargets()) consider(t);
+    if (this.earthBody.world.distanceTo(from) < SAT_SHOW_AU) for (const t of this.orbitalShell.activeCraftTargets(this.clock.seconds)) consider(t);
     const star = this.starCatalog.nearestTo(dir, from);
     // a solar-system body within 2.5° beats a star unless the star is much closer to the aim
     if (bodyT && bodySep < 2.5 && (!star || bodySep <= star.sepDeg + 2)) {

@@ -24,7 +24,7 @@ import type { FocusTarget, InspectorInfo } from '../core/regime';
 import { mulberry32 } from '../core/rng';
 import { dotTexture } from '../render/sprites';
 import { makeLabel } from '../render/label';
-import { SATELLITES, SHELLS, satLocalPosition, KM_PER_AU_ORB, type SatelliteData, type ShellData } from '../data/orbitals';
+import { SATELLITES, SHELLS, satLocalPosition, utcSeconds, KM_PER_AU_ORB, type SatelliteData, type ShellData } from '../data/orbitals';
 
 export const ORBITAL_SHOW_AU = 0.02; // debris clouds fade in inside this (≈ 8 lunar distances)
 export const SAT_SHOW_AU = 0.005; // named-craft dots + labels: close enough that orbits resolve
@@ -37,13 +37,14 @@ interface SatEntry {
   ring: LineLoop; // the orbit path — shown INSTEAD of the dot when time runs too fast to track
   local: Vector3; // Earth-relative AU (updated each frame)
   coherent: boolean; // false when the sim rate advances >~1/8 orbit per frame (dot would strobe)
+  launchSec: number; // J2000-relative sim seconds of the real launch — invisible before it
 }
 
 export class OrbitalShell {
   /** placed at Earth's camera-relative position each frame by the caller */
   readonly group = new Group();
   private readonly sats: SatEntry[] = [];
-  private readonly clouds: { shell: ShellData; points: Points }[] = [];
+  private readonly clouds: { shell: ShellData; points: Points; launchSec: number }[] = [];
   private craft_: FocusTarget[] | null = null;
   private shells_: FocusTarget[] | null = null;
 
@@ -67,7 +68,7 @@ export class OrbitalShell {
       );
       ring.visible = false;
       this.group.add(dot, label, ring);
-      this.sats.push({ s, dot, label, ring, local: new Vector3(), coherent: true });
+      this.sats.push({ s, dot, label, ring, local: new Vector3(), coherent: true, launchSec: utcSeconds(s.launched) });
     }
     // debris/constellation shells — static point clouds (the shells precess slowly in
     // reality; at display scale a fixed sample reads correctly)
@@ -93,7 +94,7 @@ export class OrbitalShell {
       }));
       points.frustumCulled = false;
       this.group.add(points);
-      this.clouds.push({ shell, points });
+      this.clouds.push({ shell, points, launchSec: utcSeconds(shell.launched) });
     }
     this.group.visible = false;
   }
@@ -110,24 +111,38 @@ export class OrbitalShell {
     }
   }
 
-  /** two visibility bands: the debris clouds resolve from further out than the
+  /** Two visibility bands: the debris clouds resolve from further out than the
    *  named craft (which would otherwise pile on the Earth dot as clutter). At
-   *  incoherent time-rates each craft shows its orbit ring instead of a strobing dot. */
-  setVisibility(earthCamDist: number): void {
+   *  incoherent time-rates each craft shows its orbit ring instead of a strobing dot.
+   *  And HISTORY is respected: nothing renders before its real launch date — scrub
+   *  the clock to 1950 and the sky above Earth is empty, as it was. */
+  setVisibility(earthCamDist: number, seconds: number): void {
     this.group.visible = earthCamDist < ORBITAL_SHOW_AU;
     if (!this.group.visible) return;
     const showSats = earthCamDist < SAT_SHOW_AU;
     for (const e of this.sats) {
-      e.dot.visible = showSats && e.coherent;
-      e.label.visible = showSats && e.coherent;
-      e.ring.visible = showSats && !e.coherent;
+      const exists = seconds >= e.launchSec;
+      e.dot.visible = showSats && exists && e.coherent;
+      e.label.visible = showSats && exists && e.coherent;
+      e.ring.visible = showSats && exists && !e.coherent;
     }
+    for (const c of this.clouds) c.points.visible = seconds >= c.launchSec;
   }
 
   /** the craft name labels — registered into the world's declutter pass so they respect
    *  the density slider and collide-resolve against the Earth/Moon labels. */
   labels(): Sprite[] {
     return this.sats.map((e) => e.label);
+  }
+
+  /** only the craft that have actually been LAUNCHED by sim time `seconds` — the
+   *  pick/search gate that keeps the ISS out of the year 1900. */
+  activeCraftTargets(seconds: number): FocusTarget[] {
+    return this.craftTargets().filter((_, i) => seconds >= this.sats[i]!.launchSec);
+  }
+
+  activeShellTargets(seconds: number): FocusTarget[] {
+    return this.shellTargets().filter((_, i) => seconds >= this.clouds[i]!.launchSec);
   }
 
   /** The named craft as pickable/searchable targets, built ONCE (stable identities —
@@ -180,6 +195,7 @@ function satInfo(s: SatelliteData): InspectorInfo {
       ['Altitude', `${s.altKm.toLocaleString()} km`],
       ['Period', s.periodMin < 200 ? `${s.periodMin.toFixed(0)} min` : `${(s.periodMin / 60).toFixed(1)} h`],
       ['Inclination', `${s.incDeg}°`],
+      ['Launched', `${s.launched[0]}-${String(s.launched[1]).padStart(2, '0')}-${String(s.launched[2]).padStart(2, '0')}`],
     ],
     blurb: s.blurb,
   };
