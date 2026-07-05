@@ -67,8 +67,20 @@ html, body {
   z-index: 10;
   font-size: 12px;
   line-height: 1.5;
+  max-height: calc(100vh - 120px); /* full data cards scroll rather than overflow the HUD */
+  overflow-y: auto;
 }
 #inspector h3 { margin: 0 0 8px; font-size: 14px; color: var(--accent); letter-spacing: 0.02em; }
+#inspector h4 {
+  margin: 10px 0 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--panel-line);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--accent2);
+}
 #inspector .row { display: flex; justify-content: space-between; gap: 12px; color: var(--ink-dim); }
 #inspector .row b { color: var(--ink); font-weight: 500; }
 #inspector .blurb { margin-top: 8px; color: var(--ink-dim); font-size: 11px; line-height: 1.55; }

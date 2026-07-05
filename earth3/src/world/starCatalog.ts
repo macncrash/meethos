@@ -24,6 +24,9 @@ import { AU_PER_PC, LY_PER_PC, sectorLabel } from '../meethos/units';
 import { STAR_NAMES } from '../data/starNames';
 import starsUrl from '../data/stars.bin?url';
 import starVelUrl from '../data/starVel.bin?url';
+import starExtUrl from '../data/starExt.bin?url';
+import DESIG from '../data/starDesig.json';
+import { CONSTELLATIONS } from '../data/constellations';
 
 const STRIDE = 6; // per star: dirX, dirY, dirZ, distPc, absmag, ci
 const MAG_LIMIT = 6.5; // faintest naked-eye magnitude in the catalog
@@ -88,6 +91,7 @@ export class StarCatalog {
   private posAttr?: BufferAttribute;
   private basePos?: Float32Array; // J2000 positions — drift displaces from these
   private vel?: Float32Array; // real space velocities (AU/yr, render frame; HYG pm+rv)
+  private ext?: Float32Array; // 9/star: raH, decDeg, pmra, pmdec, rv, lum, hip, hd, hr
   private appliedYears = 0;
   private mat?: ShaderMaterial;
   private readonly names = new Map<number, { name: string; con: string }>();
@@ -159,6 +163,12 @@ export class StarCatalog {
       if (vraw.length === n * 3) this.vel = vraw;
     } catch {
       // no velocity data — the sky simply stays a J2000 snapshot
+    }
+    try {
+      const eraw = new Float32Array(await (await fetch(starExtUrl)).arrayBuffer());
+      if (eraw.length === n * 9) this.ext = eraw;
+    } catch {
+      // no extended catalogue — cards fall back to the compact form
     }
   }
 
@@ -306,26 +316,142 @@ export class StarCatalog {
     };
   }
 
+  /** the full data card for a NAMED star — lets the 14 hand-placed divable stars
+   *  (Sirius, Vega, Fomalhaut…) serve their real catalogue card instead of a stub. */
+  cardByName(name: string): InspectorInfo | null {
+    for (const [i, v] of this.names) if (v.name === name) return this.starCard(i);
+    return null;
+  }
+
   private starCard(i: number): InspectorInfo {
     const named = this.names.get(i);
     const dpc = this.distPc?.[i] ?? 0;
     const app = (this.amagAttr!.array as Float32Array)[i]!;
     const pos = this.worldPos!;
+    const ci = this.ciArr?.[i] ?? 0.6;
     const rows: Array<[string, string]> = [
-      ['Sector', sectorLabel(pos[i * 3]!, pos[i * 3 + 1]!, pos[i * 3 + 2]!)],
       ['Distance', `${(dpc * LY_PER_PC).toFixed(2)} ly · ${dpc.toFixed(2)} pc`],
-      ['Class', spectralClass(this.ciArr?.[i] ?? 0.6)],
       ['App. mag', app.toFixed(2)],
-      ['Abs. mag', (this.absmag?.[i] ?? 0).toFixed(2)],
     ];
-    if (named?.con) rows.push(['Constellation', named.con]);
+    const title = named?.name ?? `HYG ${i}`;
+    const blurb = named
+      ? 'A named naked-eye star from the HYG catalogue.'
+      : 'A naked-eye star from the HYG catalogue — one of ~8,900 within reach.';
+    const e = this.ext;
+    if (!e || Number.isNaN(e[i * 9])) {
+      // no extended record — the compact card
+      rows.push(['Class', spectralClass(ci)], ['Abs. mag', (this.absmag?.[i] ?? 0).toFixed(2)]);
+      rows.push(['Sector', sectorLabel(pos[i * 3]!, pos[i * 3 + 1]!, pos[i * 3 + 2]!)]);
+      if (named?.con) rows.push(['Constellation', named.con]);
+      return { title, rows, blurb };
+    }
+    const o = i * 9;
+    const [raH, decDeg, pmra, pmdec, rv, lum, hip, hd, hr] = [e[o]!, e[o + 1]!, e[o + 2]!, e[o + 3]!, e[o + 4]!, e[o + 5]!, e[o + 6]!, e[o + 7]!, e[o + 8]!];
+    const d = (DESIG as Record<string, string[]>)[String(i)];
+    const [spect, bayer, flam, gl, con, varr] = [d?.[0] ?? '', d?.[1] ?? '', d?.[2] ?? '', d?.[3] ?? '', d?.[4] ?? '', d?.[5] ?? ''];
+    const temp = tempFromBV(ci);
+    // Stefan–Boltzmann radius from L and T; main-sequence M–L mass — both honest estimates
+    const radius = Number.isFinite(lum) ? Math.sqrt(lum) * (5772 / temp) ** 2 : NaN;
+    const mass = Number.isFinite(lum) ? lum ** (1 / 3.5) : NaN;
+    const conName = CONSTELLATIONS.find((c) => c.id === con)?.name ?? con;
+    const fx = (v: number, digits = 2): string => (Number.isFinite(v) ? v.toFixed(digits) : '—');
+
+    const observation: Array<[string, string]> = [
+      ['Right ascension', raHMS(raH)],
+      ['Declination', decDMS(decDeg)],
+    ];
+    if (con) observation.push(['Constellation', conName]);
+    observation.push(['Sector', sectorLabel(pos[i * 3]!, pos[i * 3 + 1]!, pos[i * 3 + 2]!)]);
+
+    const characteristics: Array<[string, string]> = [];
+    if (spect) characteristics.push(['Spectral type', spect], ['Stage', evolutionaryStage(spect)]);
+    else characteristics.push(['Class (est.)', spectralClass(ci)]);
+    characteristics.push(['B−V colour', ci.toFixed(3)], ['Temperature (est.)', `${Math.round(temp).toLocaleString()} K`]);
+    if (varr) characteristics.push(['Variable', varr]);
+
+    const astrometry: Array<[string, string]> = [
+      ['μ (RA)', `${fx(pmra, 1)} mas/yr`],
+      ['μ (Dec)', `${fx(pmdec, 1)} mas/yr`],
+    ];
+    if (Number.isFinite(rv)) astrometry.push(['Radial velocity', `${rv > 0 ? '+' : ''}${fx(rv, 1)} km/s`]);
+    astrometry.push(
+      ['Parallax', `${(1000 / dpc).toFixed(2)} mas`],
+      ['Abs. magnitude', (this.absmag?.[i] ?? 0).toFixed(2)],
+    );
+
+    const details: Array<[string, string]> = [
+      ['Luminosity', `${fx(lum)} L☉`],
+      ['Radius (est.)', `${fx(radius)} R☉`],
+      ['Mass (est.)', `${fx(mass)} M☉`],
+    ];
+
+    const names: Array<[string, string]> = [];
+    const bayerName = prettyBayer(bayer, flam, con);
+    if (bayerName) names.push(['Bayer/Flamsteed', bayerName]);
+    if (gl) names.push(['Gliese', gl]);
+    if (Number.isFinite(hip)) names.push(['Hipparcos', `HIP ${hip}`]);
+    if (Number.isFinite(hd)) names.push(['Henry Draper', `HD ${hd}`]);
+    if (Number.isFinite(hr)) names.push(['Bright Star', `HR ${hr}`]);
+
     return {
-      title: named?.name ?? 'Uncatalogued star',
-      rows,
-      blurb: named
-        ? 'A named naked-eye star from the HYG catalogue.'
-        : 'A naked-eye star from the HYG catalogue — one of ~8,900 within reach.',
+      title, rows, blurb,
+      sections: [
+        { title: 'Observation (J2000)', rows: observation },
+        { title: 'Characteristics', rows: characteristics },
+        { title: 'Astrometry', rows: astrometry },
+        { title: 'Details', rows: details },
+        ...(names.length ? [{ title: 'Designations', rows: names }] : []),
+      ],
     };
+  }
+}
+
+/** decimal hours → "22h 57m 39.0s" */
+function raHMS(raH: number): string {
+  const h = Math.floor(raH);
+  const m = Math.floor((raH - h) * 60);
+  const s = ((raH - h) * 60 - m) * 60;
+  return `${h}h ${String(m).padStart(2, '0')}m ${s.toFixed(1)}s`;
+}
+
+/** decimal degrees → "−29° 37′ 20″" */
+function decDMS(decDeg: number): string {
+  const sign = decDeg < 0 ? '−' : '+';
+  const a = Math.abs(decDeg);
+  const dg = Math.floor(a);
+  const m = Math.floor((a - dg) * 60);
+  const s = Math.round(((a - dg) * 60 - m) * 60);
+  return `${sign}${dg}° ${String(m).padStart(2, '0')}′ ${String(s).padStart(2, '0')}″`;
+}
+
+const GREEK: Record<string, string> = {
+  Alp: 'α', Bet: 'β', Gam: 'γ', Del: 'δ', Eps: 'ε', Zet: 'ζ', Eta: 'η', The: 'θ',
+  Iot: 'ι', Kap: 'κ', Lam: 'λ', Mu: 'μ', Nu: 'ν', Xi: 'ξ', Omi: 'ο', Pi: 'π',
+  Rho: 'ρ', Sig: 'σ', Tau: 'τ', Ups: 'υ', Phi: 'φ', Chi: 'χ', Psi: 'ψ', Ome: 'ω',
+};
+
+/** HYG's "Alp"+"24"+"PsA" → "24 α PsA" (superscripted components like The1 → θ¹) */
+function prettyBayer(bayer: string, flam: string, con: string): string {
+  if (!bayer && !flam) return '';
+  const m = /^([A-Za-z]+)(\d?)$/.exec(bayer);
+  const sup = ['', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'];
+  const g = m ? (GREEK[m[1]!] ?? bayer) + (m[2] ? sup[Number(m[2])]! : '') : bayer;
+  return [flam, g, con].filter(Boolean).join(' ');
+}
+
+/** MK luminosity-class → evolutionary stage. Case-SENSITIVE first match, longest
+ *  alternative first — uppercasing "Ib-IIv" would forge a phantom "IV". */
+function evolutionaryStage(spect: string): string {
+  const m = /VII|VI|IV|V|III|II|I/.exec(spect);
+  switch (m?.[0]) {
+    case 'VII': return 'white dwarf';
+    case 'VI': return 'subdwarf';
+    case 'V': return 'main sequence';
+    case 'IV': return 'subgiant';
+    case 'III': return 'giant';
+    case 'II': return 'bright giant';
+    case 'I': return 'supergiant';
+    default: return '—';
   }
 }
 

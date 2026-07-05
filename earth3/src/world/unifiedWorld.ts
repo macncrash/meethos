@@ -1227,13 +1227,14 @@ export class UnifiedWorld implements WorldFacade {
         info: (clock) => (p.id === 'earth' ? this.earth.focusTargets()[0]!.info(clock) : planetInfo(p)),
       });
     });
-    // nearest stars
+    // nearest stars — the full catalogue card when the star is in the HYG set,
+    // else the hand-written summary
     this.starBodies.forEach((sb, i) => {
       const s = STARS[i]!;
       this.pickables.push({
         id: `star-${i}`, label: s.name, radius: 0.25,
         position: (out) => out.copy(sb.body.world),
-        info: () => starInfo(s.name, s.ly, s.k),
+        info: () => this.starCatalog.cardByName(s.name) ?? starInfo(s.name, s.ly, s.k),
       });
     });
     // galactic centre

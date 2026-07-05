@@ -10,6 +10,8 @@ export interface InspectorInfo {
   title: string;
   rows: Array<[string, string]>;
   blurb?: string;
+  /** optional titled panels below the main rows — the full astronomical data card */
+  sections?: Array<{ title: string; rows: Array<[string, string]> }>;
 }
 
 /** A selectable body within a regime. Diving into one descends to its child regime. */

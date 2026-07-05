@@ -213,8 +213,13 @@ export class Hud {
     const rows = info.rows
       .map(([k, v]) => `<div class="row"><span>${k}</span><b>${v}</b></div>`)
       .join('');
+    const sections = (info.sections ?? [])
+      .map((sec) =>
+        `<h4>${sec.title}</h4>` +
+        sec.rows.map(([k, v]) => `<div class="row"><span>${k}</span><b>${v}</b></div>`).join(''))
+      .join('');
     this.inspector.innerHTML =
-      `<h3>${info.title}</h3>${rows}` + (info.blurb ? `<div class="blurb">${info.blurb}</div>` : '');
+      `<h3>${info.title}</h3>${rows}${sections}` + (info.blurb ? `<div class="blurb">${info.blurb}</div>` : '');
 
     // compact stat line = the first two rows of the focused body
     this.stats.innerHTML = info.rows
