@@ -600,3 +600,7 @@ input.realdate:focus { color: var(--accent); border-bottom-color: var(--accent2)
   pointer-events: none;
 }
 #inspector .seclink { cursor: pointer; }
+#search-results li .s-kind.k-dso { color: #ffb8cc; border-color: rgba(255, 184, 204, 0.35); }
+.inter-head { margin-top: 10px; border-top: 1px solid var(--panel-line); padding-top: 8px; }
+#inter-rows .row { display: flex; justify-content: space-between; gap: 10px; color: var(--ink-dim); font-size: 11px; line-height: 1.6; }
+#inter-rows .row b { color: var(--ink); font-weight: 500; white-space: nowrap; }

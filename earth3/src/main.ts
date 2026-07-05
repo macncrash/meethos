@@ -308,6 +308,54 @@ document.getElementById('sky-aim')?.addEventListener('click', () => {
   }
 });
 
+// ---- interstellar escape: real physics from here to the nearest stars ----
+// Voyager's 17 km/s is real; the solar-Oberth number falls out of v∞ = √(Δv² + 2·v_peri·Δv)
+// with a 3 km/s burn at 10 R☉ (v_peri ≈ 195 km/s there) — the same burn deep in the Sun's
+// gravity well buys ~34 km/s of hyperbolic excess instead of 3.
+const INTER_TARGETS: Array<[string, number]> = [
+  ['Alpha Centauri', 4.37], ["Barnard's Star", 5.96], ['Wolf 359', 7.86],
+  ['Sirius', 8.6], ['Tau Ceti', 11.91], ['Vega', 25.04],
+];
+const C_KMS = 299_792.458;
+const MU_SUN = 1.32712440018e11; // km³/s²
+const R_SUN_KM = 696_340;
+function interRows(): void {
+  const sel = document.getElementById('inter-target') as HTMLSelectElement | null;
+  const box = document.getElementById('inter-rows');
+  if (!sel || !box) return;
+  const ly = Number(sel.value);
+  const vPeri = Math.sqrt((2 * MU_SUN) / (10 * R_SUN_KM)); // ≈195 km/s at 10 R☉
+  const dv = 3;
+  const oberth = Math.sqrt(dv * dv + 2 * vPeri * dv);
+  const options: Array<[string, number]> = [
+    ['Chemical + Jupiter assist (Voyager 1)', 17],
+    ['Solar Oberth — 3 km/s burn at 10 R☉', oberth],
+    ['Nuclear-electric cruiser', 100],
+    ['Laser light-sail probe', 0.1 * C_KMS],
+    ['Fusion torch (Daedalus-class)', 0.12 * C_KMS],
+  ];
+  const fmtY = (y: number): string => (y >= 1000 ? `${Math.round(y).toLocaleString()} yr` : `${y.toFixed(1)} yr`);
+  box.innerHTML = options.map(([name, v]) => {
+    const years = (ly * C_KMS) / v;
+    const vTxt = v >= 1000 ? `${(v / C_KMS).toFixed(2)} c` : `${v.toFixed(0)} km/s`;
+    return `<div class="row"><span>${name}</span><b>${vTxt} · ${fmtY(years)}</b></div>`;
+  }).join('') +
+    '<div class="mission-note">Escaping the Sun from 1 AU needs 42.1 km/s heliocentric — Earth\'s orbit gifts 29.8 of it. Deep in the gravity well the same burn buys far more: v∞ = √(Δv² + 2·v<sub>peri</sub>·Δv).</div>';
+}
+{
+  const sel = document.getElementById('inter-target') as HTMLSelectElement | null;
+  if (sel) {
+    for (const [n, ly] of INTER_TARGETS) {
+      const o = document.createElement('option');
+      o.value = String(ly);
+      o.textContent = `${n} — ${ly} ly`;
+      sel.append(o);
+    }
+    sel.addEventListener('change', interRows);
+    interRows();
+  }
+}
+
 // ---- jump to a specific date: the clock's calendar readout is editable ----
 // Everything is analytic on absolute time (planets, moons, satellites, sidereal sky),
 // so a jump lands every body exactly where it belongs on that date.

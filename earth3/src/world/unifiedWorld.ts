@@ -58,6 +58,7 @@ import { SurfaceRegime } from '../regimes/surface';
 import { CosmicWeb } from './cosmicWeb';
 import { StarCatalog } from './starCatalog';
 import { ConstellationFigures } from './constellationFigures';
+import { DeepSky } from './deepSky';
 import { MOONS, MOON_COUNTS, KM_PER_AU, moonLocalPosition, type MoonData } from '../data/moons';
 import { OrbitalShell, SAT_SHOW_AU } from './orbitalShell';
 import { planMission, transferArc, shipPosition, type MissionPlan } from '../core/mission';
@@ -239,7 +240,7 @@ const STARS = [
 /** one row in the go-to search palette: a named destination + how to reach it. */
 export interface SearchEntry {
   name: string;
-  kind: 'planet' | 'moon' | 'sat' | 'star' | 'galaxy' | 'constellation';
+  kind: 'planet' | 'moon' | 'sat' | 'star' | 'galaxy' | 'dso' | 'constellation';
   sub?: string; // secondary line, e.g. "8.6 ly · Canis Major"
   alias?: string; // a second searchable key (a star's sector: type "2, -27" for a neighbourhood)
   target?: FocusTarget; // a place to fly to (bodies/stars/galaxies)
@@ -311,6 +312,7 @@ export class UnifiedWorld implements WorldFacade {
   // magnitude and re-projectable from any observer. Loaded async (appears when ready).
   private readonly starCatalog = new StarCatalog();
   private readonly constellations = new ConstellationFigures();
+  private readonly deepSky = new DeepSky();
 
   // Layer 3 — the Milky Way × Andromeda merger (a live restricted N-body sim), shown
   // as a self-contained Cosmos-band overlay when toggled.
@@ -514,6 +516,10 @@ export class UnifiedWorld implements WorldFacade {
     // lines render at their sky directions and align with the catalogue stars.
     scene.add(this.constellations.group);
 
+    // the bright deep sky — M31, the Magellanic Clouds, the great nebulae + clusters at
+    // their TRUE positions and TRUE spans (rebased like the star catalogue)
+    scene.add(this.deepSky.group);
+
     // the galaxy-merger overlay (hidden until toggled)
     this.merger.group.visible = false;
     scene.add(this.merger.group);
@@ -645,6 +651,7 @@ export class UnifiedWorld implements WorldFacade {
     this.galaxy.group.visible = false;
     this.cosmicWeb.group.visible = false;
     this.starCatalog.group.visible = false;
+    this.deepSky.group.visible = false;
     this.starSystem.object3d.visible = false;
     this.earth.object3d.visible = false;
     this.surface.object3d.visible = false;
@@ -980,6 +987,10 @@ export class UnifiedWorld implements WorldFacade {
     this.starCatalog.group.visible = !showCosmos;
     if (!showCosmos) this.starCatalog.group.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
 
+    // the deep sky rides along — hidden at the Cosmos band (the stylized web takes over)
+    this.deepSky.group.visible = !showCosmos;
+    if (!showCosmos) this.deepSky.group.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
+
     // constellation figures ride no origin (they are directions): shown only when observing
     // and a constellation is selected — from Earth/near-Sun they lie on the real stars.
     this.constellations.group.visible = observer && this.constellations.active !== null;
@@ -1290,9 +1301,13 @@ export class UnifiedWorld implements WorldFacade {
     return this.selectedTarget ?? this.focusTarget;
   }
 
-  /** pick the nearest catalogue star at a screen point (NDC) — its rich card for the inspector */
+  /** pick the nearest catalogue star at a screen point (NDC) — falling back to the
+   *  deep-sky catalogue (M31, the great nebulae…) when no star is under the cursor */
   pickStar(ndcX: number, ndcY: number): FocusTarget | null {
-    return this.starCatalog.pickTarget(ndcX, ndcY, this.camera, this.fo.camWorld);
+    return (
+      this.starCatalog.pickTarget(ndcX, ndcY, this.camera, this.fo.camWorld) ??
+      this.deepSky.pickTarget(ndcX, ndcY, this.camera, this.fo.camWorld)
+    );
   }
 
   /** select a catalogue star: show its card in the inspector without moving the camera */
@@ -1417,7 +1432,22 @@ export class UnifiedWorld implements WorldFacade {
     }
     for (const t of this.orbitalShell.activeCraftTargets(this.clock.seconds)) out.push({ name: t.label, kind: 'sat', sub: 'Earth orbit', target: t });
     for (const t of this.orbitalShell.activeShellTargets(this.clock.seconds)) out.push({ name: t.label, kind: 'sat', sub: 'debris field', target: t });
-    for (const g of this.cosmicWeb.searchTargets()) out.push({ name: g.label, kind: 'galaxy', target: g });
+    // the deep-sky catalogue: true-position galaxies, nebulae and clusters
+    for (const { o, target } of this.deepSky.targets()) {
+      out.push({
+        name: o.name,
+        kind: o.type === 'galaxy' ? 'galaxy' : 'dso',
+        sub: o.distLy >= 1e6 ? `${(o.distLy / 1e6).toFixed(1)} Mly` : `${Math.round(o.distLy / 1000).toLocaleString()} kly`,
+        target,
+      });
+    }
+    // (the stylized cosmos-band Local Group sprites are superseded by the true-position
+    //  deep-sky entries above — keep only the Milky Way + Cosmic Web destinations)
+    const superseded = new Set(['andromeda', 'gal-Triangulum (M33)', 'gal-LMC', 'gal-SMC']);
+    for (const g of this.cosmicWeb.searchTargets()) {
+      if (superseded.has(g.id)) continue;
+      out.push({ name: g.label, kind: 'galaxy', target: g });
+    }
     const seen = new Set(out.map((e) => e.name.toLowerCase()));
     // the WHOLE catalogue — all ~8,900 naked-eye stars, named or 'HYG n', each with its
     // sector as a search alias. The palette only ever shows the top matches, so the
