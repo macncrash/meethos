@@ -1305,6 +1305,20 @@ export class UnifiedWorld implements WorldFacade {
   /** pick the nearest catalogue star at a screen point (NDC) — falling back to the
    *  deep-sky catalogue (M31, the great nebulae…) when no star is under the cursor */
   pickStar(ndcX: number, ndcY: number): FocusTarget | null {
+    // box-selected (labelled) stars are explicit focus — give them a big hit area
+    // first, so clicking a label or its star reliably opens the card
+    let bestSel = -1;
+    let bestD = 0.06 * 0.06;
+    for (const l of this.selLabels) {
+      if (!this.starCatalog.positionOf(l.idx, this.selTmp)) continue;
+      this.selTmp.sub(this.fo.camWorld).project(this.camera);
+      if (this.selTmp.z > 1) continue;
+      const dx = this.selTmp.x - ndcX;
+      const dy = this.selTmp.y - ndcY;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; bestSel = l.idx; }
+    }
+    if (bestSel >= 0) return this.starCatalog.targetOf(bestSel);
     return (
       this.starCatalog.pickTarget(ndcX, ndcY, this.camera, this.fo.camWorld) ??
       this.deepSky.pickTarget(ndcX, ndcY, this.camera, this.fo.camWorld)

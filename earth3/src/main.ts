@@ -308,6 +308,37 @@ document.getElementById('sky-aim')?.addEventListener('click', () => {
   }
 });
 
+// ---- sky panel place picker: choose a city, stand there, see tonight's sky ----
+const SKY_CITIES: Array<[string, number, number]> = [
+  ['New York', 40.71, -74.01], ['London', 51.51, -0.13], ['Paris', 48.86, 2.35],
+  ['Tokyo', 35.68, 139.69], ['Beijing', 39.9, 116.41], ['Delhi', 28.61, 77.21],
+  ['Moscow', 55.76, 37.62], ['Cairo', 30.04, 31.24], ['Nairobi', -1.29, 36.82],
+  ['Sydney', -33.87, 151.21], ['Cape Town', -33.92, 18.42], ['Sao Paulo', -23.55, -46.63],
+  ['Mexico City', 19.43, -99.13], ['Honolulu', 21.31, -157.86], ['Reykjavik', 64.15, -21.94],
+  ['McMurdo Station', -77.85, 166.67],
+];
+{
+  const citySel = document.getElementById('sky-city') as HTMLSelectElement | null;
+  if (citySel) {
+    SKY_CITIES.forEach(([n], i) => {
+      const o = document.createElement('option');
+      o.value = String(i);
+      o.textContent = n;
+      citySel.append(o);
+    });
+    citySel.addEventListener('change', () => {
+      const c = SKY_CITIES[Number(citySel.value)];
+      if (!c) return;
+      const latEl = document.getElementById('sky-lat') as HTMLInputElement | null;
+      const lonEl = document.getElementById('sky-lon') as HTMLInputElement | null;
+      if (latEl) latEl.value = String(c[1]);
+      if (lonEl) lonEl.value = String(c[2]);
+      // stand there immediately — the point of picking a place is seeing ITS sky
+      (document.getElementById('sky-stand') as HTMLButtonElement | null)?.click();
+    });
+  }
+}
+
 // ---- interstellar escape: real physics from here to the nearest stars ----
 // Voyager's 17 km/s is real; the solar-Oberth number falls out of v∞ = √(Δv² + 2·v_peri·Δv)
 // with a 3 km/s burn at 10 R☉ (v_peri ≈ 195 km/s there) — the same burn deep in the Sun's
@@ -525,7 +556,9 @@ canvas.addEventListener('pointermove', (e) => {
   if (!unified || e.buttons !== 0) return;
   pointer.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
   raycaster.setFromCamera(pointer, camera);
-  unified.setHovered(unified.pick(raycaster.ray));
+  // bodies first; else name the catalogue star / deep-sky object under the cursor —
+  // the hover label is the 'what am I about to click' affordance a sky atlas needs
+  unified.setHovered(unified.pick(raycaster.ray) ?? unified.pickStar(pointer.x, pointer.y));
 });
 
 canvas.addEventListener('click', (e) => {
@@ -597,6 +630,7 @@ function animate(): void {
 animate();
 
 window.addEventListener('resize', () => {
+  if (window.innerWidth === 0 || window.innerHeight === 0) return; // a collapsed panel would poison aspect with NaN
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);

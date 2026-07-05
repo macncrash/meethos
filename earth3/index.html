@@ -46,6 +46,10 @@
     <div id="skyid" hidden role="dialog" aria-label="Sky identification">
       <div class="rp-head"><span>⌖ What is that?</span><button id="sky-close" title="Close">✕</button></div>
       <div class="sky-row">
+        <span class="sky-cap">Place</span>
+        <select id="sky-city" aria-label="Choose a place on Earth"><option value="">custom…</option></select>
+      </div>
+      <div class="sky-row">
         <span class="sky-cap">Ground</span>
         <input id="sky-lat" type="text" inputmode="decimal" value="40.7" aria-label="Latitude" /><span class="sky-unit">°N</span>
         <input id="sky-lon" type="text" inputmode="decimal" value="-74.0" aria-label="Longitude" /><span class="sky-unit">°E</span>

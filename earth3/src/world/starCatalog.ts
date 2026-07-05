@@ -230,7 +230,7 @@ export class StarCatalog {
     const pos = this.worldPos;
     const amag = this.amagAttr.array as Float32Array;
     let best = -1;
-    let bestD = 0.02 * 0.02; // NDC pick radius²
+    let bestD = 0.035 * 0.035; // NDC pick radius² — generous, like a telescope app
     for (let i = 0; i < amag.length; i++) {
       if (amag[i]! > MAG_LIMIT + 0.5) continue; // not rendered (too faint / suppressed)
       this._p.set(pos[i * 3]! - camWorld.x, pos[i * 3 + 1]! - camWorld.y, pos[i * 3 + 2]! - camWorld.z).project(camera);
@@ -346,6 +346,18 @@ export class StarCatalog {
       if (this._p.x >= minX && this._p.x <= maxX && this._p.y >= minY && this._p.y <= maxY) out.push(i);
     }
     return out;
+  }
+
+  /** a FocusTarget for star `i` — the same card the screen-space pick serves */
+  targetOf(idx: number): FocusTarget {
+    const pos = this.worldPos!;
+    return {
+      id: `hyg-${idx}`,
+      label: this.names.get(idx)?.name ?? `HYG ${idx}`,
+      radius: 0.25,
+      position: (out) => out.set(pos[idx * 3]!, pos[idx * 3 + 1]!, pos[idx * 3 + 2]!),
+      info: () => this.starCard(idx),
+    };
   }
 
   /** star `i`'s absolute AU position (drift-aware) into `out`; false if not loaded */
