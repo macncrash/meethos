@@ -409,6 +409,51 @@ if (unified) unified.onMissionArrived = (plan) => {
   unified.clearMission();
 };
 
+// ---- box-select (right-drag) — highlight a patch of sky and label its stars ----
+const boxEl = document.getElementById('boxsel');
+let boxStart: { x: number; y: number } | null = null;
+function selToast(n: number): void {
+  const toast = document.getElementById('toast');
+  if (!toast) return;
+  toast.textContent = n === 0 ? 'No stars in the box.' : `✦ ${n} star${n === 1 ? '' : 's'} selected — Esc to clear`;
+  toast.hidden = false;
+  toast.classList.add('show');
+  window.setTimeout(() => toast.classList.remove('show'), 2600);
+}
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+canvas.addEventListener('pointerdown', (e) => {
+  if (e.button !== 2 || !unified) return;
+  boxStart = { x: e.clientX, y: e.clientY };
+});
+window.addEventListener('pointermove', (e) => {
+  if (!boxStart || !boxEl) return;
+  const x = Math.min(boxStart.x, e.clientX);
+  const y = Math.min(boxStart.y, e.clientY);
+  boxEl.hidden = false;
+  boxEl.style.left = `${x}px`;
+  boxEl.style.top = `${y}px`;
+  boxEl.style.width = `${Math.abs(e.clientX - boxStart.x)}px`;
+  boxEl.style.height = `${Math.abs(e.clientY - boxStart.y)}px`;
+});
+window.addEventListener('pointerup', (e) => {
+  if (e.button !== 2 || !boxStart || !unified) return;
+  if (boxEl) boxEl.hidden = true;
+  const start = boxStart;
+  boxStart = null;
+  // a bare right-CLICK selects a small patch around the cursor; a drag uses the box
+  const pad = start.x === e.clientX && start.y === e.clientY ? 14 : 0;
+  const x0 = Math.min(start.x, e.clientX) - pad;
+  const x1 = Math.max(start.x, e.clientX) + pad;
+  const y0 = Math.min(start.y, e.clientY) - pad;
+  const y1 = Math.max(start.y, e.clientY) + pad;
+  const nx = (px: number): number => (px / window.innerWidth) * 2 - 1;
+  const ny = (py: number): number => -(py / window.innerHeight) * 2 + 1;
+  selToast(unified.boxSelect(nx(x0), ny(y1), nx(x1), ny(y0))); // y flips in NDC
+});
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && unified && !searchOpen() && unified.selectionCount > 0) unified.clearStarSelection();
+});
+
 // ---- pointer picking (click = focus, double-click = dive) ----
 const raycaster = new Raycaster();
 const pointer = new Vector2();

@@ -20,7 +20,7 @@ import type { PerspectiveCamera } from 'three';
 import type { FocusTarget, InspectorInfo } from '../core/regime';
 import { blackbodyColor } from '../core/color';
 import { dotTexture } from '../render/sprites';
-import { AU_PER_PC, LY_PER_PC, sectorLabel } from '../meethos/units';
+import { AU_PER_LY, AU_PER_PC, LY_PER_PC, SECTOR_LY, sectorLabel } from '../meethos/units';
 import { STAR_NAMES } from '../data/starNames';
 import starsUrl from '../data/stars.bin?url';
 import starVelUrl from '../data/starVel.bin?url';
@@ -317,6 +317,55 @@ export class StarCatalog {
     };
   }
 
+  /** all catalogue stars whose 5-ly sector matches (sx, sy, sz) — the Sun excluded */
+  indicesInSector(sx: number, sy: number, sz: number): number[] {
+    if (!this.worldPos || !this.distPc) return [];
+    const out: number[] = [];
+    const k = 1 / (AU_PER_LY * SECTOR_LY);
+    for (let i = 0; i < this.distPc.length; i++) {
+      if (i === this.sunIndex) continue;
+      if (
+        Math.round(this.worldPos[i * 3]! * k) === sx &&
+        Math.round(this.worldPos[i * 3 + 1]! * k) === sy &&
+        Math.round(this.worldPos[i * 3 + 2]! * k) === sz
+      ) out.push(i);
+    }
+    return out;
+  }
+
+  /** all RENDERED stars whose screen projection falls inside an NDC rectangle */
+  indicesInRect(minX: number, minY: number, maxX: number, maxY: number, camera: PerspectiveCamera, camWorld: Vector3): number[] {
+    if (!this.worldPos || !this.amagAttr) return [];
+    const amag = this.amagAttr.array as Float32Array;
+    const pos = this.worldPos;
+    const out: number[] = [];
+    for (let i = 0; i < amag.length; i++) {
+      if (amag[i]! > MAG_LIMIT + 0.5) continue; // not drawn from here
+      this._p.set(pos[i * 3]! - camWorld.x, pos[i * 3 + 1]! - camWorld.y, pos[i * 3 + 2]! - camWorld.z).project(camera);
+      if (this._p.z > 1) continue; // behind the camera
+      if (this._p.x >= minX && this._p.x <= maxX && this._p.y >= minY && this._p.y <= maxY) out.push(i);
+    }
+    return out;
+  }
+
+  /** star `i`'s absolute AU position (drift-aware) into `out`; false if not loaded */
+  positionOf(i: number, out: Vector3): boolean {
+    if (!this.worldPos) return false;
+    out.set(this.worldPos[i * 3]!, this.worldPos[i * 3 + 1]!, this.worldPos[i * 3 + 2]!);
+    return true;
+  }
+
+  /** name / colour / brightness for building a selection label on star `i` */
+  labelInfo(i: number): { name: string; color: number; amag: number } {
+    const c = new Color();
+    blackbodyColor(tempFromBV(this.ciArr?.[i] ?? 0.6), c);
+    return {
+      name: this.names.get(i)?.name ?? `HYG ${i}`,
+      color: c.getHex(),
+      amag: (this.amagAttr?.array as Float32Array | undefined)?.[i] ?? 99,
+    };
+  }
+
   /** the full data card for a NAMED star — lets the 14 hand-placed divable stars
    *  (Sirius, Vega, Fomalhaut…) serve their real catalogue card instead of a stub.
    *  Falls back to a HIP-number alias for stars HYG names differently (or not at
@@ -350,7 +399,7 @@ export class StarCatalog {
     if (!e || Number.isNaN(e[i * 9])) {
       // no extended record — the compact card
       rows.push(['Class', spectralClass(ci)], ['Abs. mag', (this.absmag?.[i] ?? 0).toFixed(2)]);
-      rows.push(['Sector', sectorLabel(pos[i * 3]!, pos[i * 3 + 1]!, pos[i * 3 + 2]!)]);
+      rows.push(['Sector', sectorLink(pos[i * 3]!, pos[i * 3 + 1]!, pos[i * 3 + 2]!)]);
       if (named?.con) rows.push(['Constellation', named.con]);
       return { title, rows, blurb };
     }
@@ -370,7 +419,7 @@ export class StarCatalog {
       ['Declination', decDMS(decDeg)],
     ];
     if (con) observation.push(['Constellation', conName]);
-    observation.push(['Sector', sectorLabel(pos[i * 3]!, pos[i * 3 + 1]!, pos[i * 3 + 2]!)]);
+    observation.push(['Sector', sectorLink(pos[i * 3]!, pos[i * 3 + 1]!, pos[i * 3 + 2]!)]);
 
     const characteristics: Array<[string, string]> = [];
     if (spect) characteristics.push(['Spectral type', spect], ['Stage', evolutionaryStage(spect)]);
@@ -498,6 +547,13 @@ const ALIAS_HIP: Record<string, number> = {
 const EXO_TITLE_ALIAS: Record<string, string> = {
   'Rigil Kentaurus': 'Alpha Centauri',
 };
+
+/** the sector row as an internal action link — the HUD delegates [data-sector] clicks
+ *  to goToSector(), which flies there and labels the whole neighbourhood. */
+function sectorLink(xAu: number, yAu: number, zAu: number): string {
+  const s = (v: number): number => Math.round(v / AU_PER_LY / SECTOR_LY);
+  return `<a class="seclink" data-sector="${s(xAu)},${s(yAu)},${s(zAu)}" title="Fly to this 5-ly sector and label its stars">${sectorLabel(xAu, yAu, zAu)} ⌖</a>`;
+}
 
 /** where a Wien-peak wavelength falls in the spectrum, in words */
 function spectrumWord(nm: number): string {

@@ -37,6 +37,8 @@ export interface WorldFacade {
   /** Layer 3 merger overlay (UnifiedWorld only; absent on the legacy path). */
   toggleMerger?(): void;
   readonly mergerActive?: boolean;
+  /** fly to a 5-ly sector of the stellar grid and label its stars (UnifiedWorld only) */
+  goToSector?(sx: number, sy: number, sz: number): void;
 
   // comet / defense
   launchComet(): void;

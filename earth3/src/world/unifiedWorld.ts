@@ -47,7 +47,7 @@ import { dotTexture, glowTexture } from '../render/sprites';
 import { makeLabel } from '../render/label';
 import { planetPosition, orbitPath } from '../regimes/data/kepler';
 import { PLANETS, SUN } from '../regimes/data/planets';
-import { AU_M, AU_PER_LY, AU_PER_PC, EARTH_RADIUS_AU, SUN_RADIUS_AU } from '../meethos/units';
+import { AU_M, AU_PER_LY, AU_PER_PC, EARTH_RADIUS_AU, SECTOR_LY, SUN_RADIUS_AU } from '../meethos/units';
 import { eclipticDirFromRaDec, galacticBasis, groundDir, altazDir } from '../meethos/frames';
 import { FloatingOrigin } from '../meethos/floatingOrigin';
 import { EarthRegime } from '../regimes/earth';
@@ -377,6 +377,10 @@ export class UnifiedWorld implements WorldFacade {
   /** the object the pointer is hovering — its name is always shown (hoverLabel) */
   private hoveredTarget: FocusTarget | null = null;
   private hoverLabel: Sprite | null = null;
+  // star selection (box-select / sector view): labelled catalogue stars that persist
+  // until cleared — each label rides its star's (drift-aware) position every frame
+  private selLabels: Array<{ sprite: Sprite; idx: number }> = [];
+  private readonly selTmp = new Vector3();
   /** highlighted orbit ellipse for the hovered/selected planet (great in pause) */
   private orbitLine: LineLoop | null = null;
   private orbitBodyId: string | null = null;
@@ -549,7 +553,10 @@ export class UnifiedWorld implements WorldFacade {
 
     // ---- f64 orbit camera input (the proven zoomDemo rig) ----
     const canvas = renderer.domElement;
-    canvas.addEventListener('pointerdown', (e) => { this.dragging = true; this.lx = e.clientX; this.ly = e.clientY; });
+    canvas.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return; // right button belongs to box-select
+      this.dragging = true; this.lx = e.clientX; this.ly = e.clientY;
+    });
     window.addEventListener('pointerup', () => { this.dragging = false; });
     window.addEventListener('pointermove', (e) => {
       if (!this.dragging) return;
@@ -643,6 +650,7 @@ export class UnifiedWorld implements WorldFacade {
     this.surface.object3d.visible = false;
     this.orbitalShell.group.visible = false;
     this.surfaces.setAllHidden();
+    for (const l of this.selLabels) l.sprite.visible = false; // the merger owns the view
     for (const b of this.bodies) { b.dot.visible = false; b.label.visible = false; }
     for (const ring of this.rings) { ring.line.visible = false; ring.label.visible = false; }
     if (this.orbitLine) this.orbitLine.visible = false;
@@ -976,6 +984,14 @@ export class UnifiedWorld implements WorldFacade {
     // and a constellation is selected — from Earth/near-Sun they lie on the real stars.
     this.constellations.group.visible = observer && this.constellations.active !== null;
 
+    // selection labels ride their stars' (possibly drifted) positions; hidden with the
+    // catalogue at the Cosmos band
+    for (const l of this.selLabels) {
+      const ok = this.starCatalog.positionOf(l.idx, this.selTmp);
+      l.sprite.visible = ok && !showCosmos;
+      if (ok) this.fo.place(l.sprite, this.selTmp);
+    }
+
     // the Earth band: place the true-scale globe at Earth's heliocentric AU position,
     // shown only when the camera is close enough that the globe is more than a glint.
     const earthWorld = this.earthBody.world;
@@ -1283,6 +1299,69 @@ export class UnifiedWorld implements WorldFacade {
   select(target: FocusTarget | null): void {
     this.selectedTarget = target;
     this.onChange?.();
+  }
+
+  // ---- multi-star selection: box-select / sector view ----
+
+  /** label a set of catalogue stars (brightest first, capped so the sky stays legible).
+   *  The labels persist — riding their stars' drift-aware positions — until cleared. */
+  selectStars(indices: number[]): number {
+    this.clearStarSelection();
+    const MAX_LABELS = 60;
+    const ranked = indices
+      .map((i) => ({ i, info: this.starCatalog.labelInfo(i) }))
+      .sort((a, b) => a.info.amag - b.info.amag);
+    for (const { i, info } of ranked.slice(0, MAX_LABELS)) {
+      const sprite = makeLabel(info.name, info.color, 0.026);
+      sprite.renderOrder = 7; // above the hover label
+      this.scene.add(sprite);
+      this.selLabels.push({ sprite, idx: i });
+    }
+    return indices.length;
+  }
+
+  clearStarSelection(): void {
+    for (const l of this.selLabels) {
+      this.scene.remove(l.sprite);
+      const mat = l.sprite.material;
+      mat.map?.dispose();
+      mat.dispose();
+    }
+    this.selLabels = [];
+  }
+
+  get selectionCount(): number {
+    return this.selLabels.length;
+  }
+
+  /** box-select: label every rendered star inside an NDC rectangle. Returns the hit count. */
+  boxSelect(minX: number, minY: number, maxX: number, maxY: number): number {
+    return this.selectStars(this.starCatalog.indicesInRect(minX, minY, maxX, maxY, this.camera, this.fo.camWorld));
+  }
+
+  /** fly to a 5-ly sector and light up its whole neighbourhood with labels */
+  goToSector(sx: number, sy: number, sz: number): void {
+    const indices = this.starCatalog.indicesInSector(sx, sy, sz);
+    this.selectStars(indices);
+    const cx = sx * SECTOR_LY * AU_PER_LY;
+    const cy = sy * SECTOR_LY * AU_PER_LY;
+    const cz = sz * SECTOR_LY * AU_PER_LY;
+    const names = indices.map((i) => this.starCatalog.labelInfo(i)).sort((a, b) => a.amag - b.amag).slice(0, 3).map((x) => x.name);
+    this.goToTarget({
+      id: `sector-${sx},${sy},${sz}`,
+      label: `Sector ${sx}, ${sy}, ${sz}`,
+      radius: (SECTOR_LY * AU_PER_LY) / 40, // frames the cube at ~1.5× its span
+      position: (out) => out.set(cx, cy, cz),
+      info: () => ({
+        title: `Sector ${sx}, ${sy}, ${sz}`,
+        rows: [
+          ['Stars', String(indices.length)],
+          ['Cube', `${SECTOR_LY} ly · Sun-centred grid`],
+          ...(names.length ? [['Brightest', names.join(', ')] as [string, string]] : []),
+        ],
+        blurb: 'A 5-light-year cube of the stellar neighbourhood grid. Its naked-eye stars are labelled; Esc clears them.',
+      }),
+    });
   }
 
   breadcrumb(): Breadcrumb[] {

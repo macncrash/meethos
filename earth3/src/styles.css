@@ -590,3 +590,13 @@ input.realdate {
 }
 input.realdate:hover { color: var(--ink); border-bottom-color: var(--panel-line); }
 input.realdate:focus { color: var(--accent); border-bottom-color: var(--accent2); }
+
+/* ---- box-select rubber band (right-drag) ---- */
+#boxsel {
+  position: fixed;
+  z-index: 15;
+  border: 1px dashed var(--accent2);
+  background: rgba(122, 168, 255, 0.08);
+  pointer-events: none;
+}
+#inspector .seclink { cursor: pointer; }

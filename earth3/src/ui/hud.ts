@@ -50,6 +50,13 @@ export class Hud {
       if (this.manager.mergerActive) this.showToast('⟳ The Milky Way and Andromeda collide — ~4.5 Gyr from now', 3600);
     });
     byId('restart-btn').addEventListener('click', () => this.startGame());
+    // sector links inside the (re-rendered-every-frame) inspector: one delegated handler
+    this.inspector.addEventListener('click', (e) => {
+      const a = (e.target as HTMLElement).closest('[data-sector]');
+      if (!a) return;
+      const [sx, sy, sz] = (a.getAttribute('data-sector') ?? '').split(',').map(Number);
+      if ([sx, sy, sz].every(Number.isFinite)) this.manager.goToSector?.(sx!, sy!, sz!);
+    });
     bus.onImpact((e) => {
       const sev = e.energy > 0.75 ? 'Catastrophic' : e.energy > 0.5 ? 'Major' : 'Significant';
       this.showToast(`☄ ${sev} impact on Earth — civilization set back`);
