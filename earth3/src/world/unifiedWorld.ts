@@ -974,6 +974,7 @@ export class UnifiedWorld implements WorldFacade {
     this.galaxy.group.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
     this.cometGroup.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
     this.updateRouteLine(); // the planned route path (camera-relative)
+    this.updateEscapeLine(); // the interstellar escape overlay, if shown
 
     // the cosmic web: Big-Bang formation runs whenever active; shown + rebased only
     // at the Cosmos band (zoomed out past the galaxy) — never in observer mode.
@@ -1879,16 +1880,81 @@ export class UnifiedWorld implements WorldFacade {
     for (const mb of this.moonBodies) consider(mb.target);
     if (this.earthBody.world.distanceTo(from) < SAT_SHOW_AU) for (const t of this.orbitalShell.activeCraftTargets(this.clock.seconds)) consider(t);
     const star = this.starCatalog.nearestTo(dir, from);
-    // a solar-system body within 2.5° beats a star unless the star is much closer to the aim
-    if (bodyT && bodySep < 2.5 && (!star || bodySep <= star.sepDeg + 2)) {
+    const dso = this.deepSky.nearestTo(dir, from);
+    // a solar-system body within 2.5° beats a star unless the star is much closer to the
+    // aim — but NOT a deep-sky object you are aiming straight into, unless it's dead-on
+    if (bodyT && bodySep < 2.5 && (!star || bodySep <= star.sepDeg + 2) && (!dso || bodySep < 0.8)) {
       this.select(bodyT);
       return { label: (bodyT as FocusTarget).label, sub: `${bodySep.toFixed(1)}° from your aim` };
+    }
+    // aiming INTO an extended deep-sky object (M31, a nebula) beats a merely-near star
+    if (dso && (!star || star.sepDeg > 0.7)) {
+      this.select(dso.target);
+      return { label: dso.target.label, sub: `mag ${dso.mag.toFixed(1)} · spans ${dso.sizeDeg.toFixed(1)}°` };
     }
     if (star) {
       this.select(star.target);
       return { label: star.target.label, sub: `mag ${star.mag.toFixed(1)} · ${star.sepDeg.toFixed(1)}° from your aim` };
     }
     return null;
+  }
+
+  // ---- interstellar escape route: Earth → Jupiter assist → hyperbolic leg ----
+  private escapeLine: Line | null = null;
+  private escapePts: Vector3[] | null = null;
+
+  /** Draw the classic escape: the real Earth→Jupiter transfer from the next window,
+   *  then the post-assist leg bending prograde out past 100 AU (simplified: the true
+   *  hyperbolic pump around Jupiter is collapsed to its asymptote). */
+  showEscapeRoute(): { departDays: number } | null {
+    const from = PLANETS.find((p) => p.id === 'earth')!;
+    const to = PLANETS.find((p) => p.id === 'jupiter')!;
+    const plan = planMission(from, to, this.clock.seconds);
+    const arc = transferArc(from, to, plan);
+    const last = arc[arc.length - 1]!;
+    const prev = arc[arc.length - 2]!;
+    const vOut = last.clone().sub(prev).normalize();
+    const prograde = new Vector3(0, 1, 0).cross(last.clone().normalize()).normalize();
+    if (prograde.dot(vOut) < 0) prograde.multiplyScalar(-1); // bend WITH the flow
+    const legDir = vOut.add(prograde.multiplyScalar(0.7)).normalize();
+    const pts = [...arc];
+    for (let d = 1; d <= 12; d++) pts.push(last.clone().addScaledVector(legDir, (d * d * 100) / 144));
+    this.clearEscapeRoute();
+    const geom = new BufferGeometry();
+    geom.setAttribute('position', new BufferAttribute(new Float32Array(pts.length * 3), 3));
+    this.escapeLine = new Line(geom, new LineBasicMaterial({ color: 0xffc36a, transparent: true, opacity: 0.85, depthTest: false }));
+    this.escapeLine.renderOrder = 4;
+    this.escapeLine.frustumCulled = false;
+    this.scene.add(this.escapeLine);
+    this.escapePts = pts;
+    // frame it: the Sun at centre, out past Jupiter
+    this.exitObserver();
+    this.focusSun();
+    this.targetLog = Math.log10(14);
+    return { departDays: (plan.departSeconds - this.clock.seconds) / 86400 };
+  }
+
+  clearEscapeRoute(): void {
+    if (this.escapeLine) {
+      this.scene.remove(this.escapeLine);
+      this.escapeLine.geometry.dispose();
+      (this.escapeLine.material as LineBasicMaterial).dispose();
+    }
+    this.escapeLine = null;
+    this.escapePts = null;
+  }
+
+  private updateEscapeLine(): void {
+    if (!this.escapeLine || !this.escapePts) return;
+    const arr = this.escapeLine.geometry.getAttribute('position') as BufferAttribute;
+    const a = arr.array as Float32Array;
+    for (let i = 0; i < this.escapePts.length; i++) {
+      const p = this.escapePts[i]!;
+      a[i * 3] = p.x - this.fo.camWorld.x;
+      a[i * 3 + 1] = p.y - this.fo.camWorld.y;
+      a[i * 3 + 2] = p.z - this.fo.camWorld.z;
+    }
+    arr.needsUpdate = true;
   }
 
   showConstellation(id: string): void {

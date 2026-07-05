@@ -354,6 +354,10 @@ function interRows(): void {
     sel.addEventListener('change', interRows);
     interRows();
   }
+  document.getElementById('inter-show')?.addEventListener('click', () => {
+    const r = unified?.showEscapeRoute();
+    if (r) selToast(Math.round(r.departDays));
+  });
 }
 
 // ---- jump to a specific date: the clock's calendar readout is editable ----
@@ -499,7 +503,10 @@ window.addEventListener('pointerup', (e) => {
   selToast(unified.boxSelect(nx(x0), ny(y1), nx(x1), ny(y0))); // y flips in NDC
 });
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && unified && !searchOpen() && unified.selectionCount > 0) unified.clearStarSelection();
+  if (e.key === 'Escape' && unified && !searchOpen()) {
+    if (unified.selectionCount > 0) unified.clearStarSelection();
+    unified.clearEscapeRoute();
+  }
 });
 
 // ---- pointer picking (click = focus, double-click = dive) ----
