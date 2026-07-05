@@ -241,14 +241,7 @@ export class StarCatalog {
       if (d < bestD) { bestD = d; best = i; }
     }
     if (best < 0) return null;
-    const idx = best;
-    return {
-      id: `hyg-${idx}`,
-      label: this.names.get(idx)?.name ?? 'Star',
-      radius: 0.25,
-      position: (out) => out.set(pos[idx * 3]!, pos[idx * 3 + 1]!, pos[idx * 3 + 2]!),
-      info: () => this.starCard(idx),
-    };
+    return this.targetOf(best); // named stars by name, the rest as 'HYG n' — never a bare 'Star'
   }
 
   /** EVERY catalogue star as a searchable destination — named stars by name, the rest
