@@ -27,6 +27,7 @@ import starVelUrl from '../data/starVel.bin?url';
 import starExtUrl from '../data/starExt.bin?url';
 import DESIG from '../data/starDesig.json';
 import { CONSTELLATIONS } from '../data/constellations';
+import { EXO_SYSTEMS } from '../regimes/data/exoplanets';
 
 const STRIDE = 6; // per star: dirX, dirY, dirZ, distPc, absmag, ci
 const MAG_LIMIT = 6.5; // faintest naked-eye magnitude in the catalog
@@ -317,13 +318,21 @@ export class StarCatalog {
   }
 
   /** the full data card for a NAMED star — lets the 14 hand-placed divable stars
-   *  (Sirius, Vega, Fomalhaut…) serve their real catalogue card instead of a stub. */
+   *  (Sirius, Vega, Fomalhaut…) serve their real catalogue card instead of a stub.
+   *  Falls back to a HIP-number alias for stars HYG names differently (or not at
+   *  all): 'Tau Ceti' has no proper name, 'Alpha Centauri' is Rigil Kentaurus. */
   cardByName(name: string): InspectorInfo | null {
     for (const [i, v] of this.names) if (v.name === name) return this.starCard(i);
+    const hip = ALIAS_HIP[name];
+    if (hip !== undefined && this.ext) {
+      for (let i = 0; i < this.ext.length / 9; i++) {
+        if (this.ext[i * 9 + 6] === hip) return this.starCard(i, name);
+      }
+    }
     return null;
   }
 
-  private starCard(i: number): InspectorInfo {
+  private starCard(i: number, titleOverride?: string): InspectorInfo {
     const named = this.names.get(i);
     const dpc = this.distPc?.[i] ?? 0;
     const app = (this.amagAttr!.array as Float32Array)[i]!;
@@ -333,7 +342,7 @@ export class StarCatalog {
       ['Distance', `${(dpc * LY_PER_PC).toFixed(2)} ly · ${dpc.toFixed(2)} pc`],
       ['App. mag', app.toFixed(2)],
     ];
-    const title = named?.name ?? `HYG ${i}`;
+    const title = titleOverride ?? named?.name ?? `HYG ${i}`;
     const blurb = named
       ? 'A named naked-eye star from the HYG catalogue.'
       : 'A naked-eye star from the HYG catalogue — one of ~8,900 within reach.';
@@ -368,6 +377,8 @@ export class StarCatalog {
     else characteristics.push(['Class (est.)', spectralClass(ci)]);
     characteristics.push(['B−V colour', ci.toFixed(3)], ['Temperature (est.)', `${Math.round(temp).toLocaleString()} K`]);
     if (varr) characteristics.push(['Variable', varr]);
+    const exo = EXO_SYSTEMS[title] ?? EXO_SYSTEMS[EXO_TITLE_ALIAS[title] ?? ''];
+    if (exo) characteristics.push(['Known planets', `${exo.length} — dive in to visit`]);
 
     const astrometry: Array<[string, string]> = [
       ['μ (RA)', `${fx(pmra, 1)} mas/yr`],
@@ -379,19 +390,46 @@ export class StarCatalog {
       ['Abs. magnitude', (this.absmag?.[i] ?? 0).toFixed(2)],
     );
 
+    // further DERIVED physics, all honestly (est.)-labelled:
+    // log g from GM/R²; total main-sequence lifetime ~10 Gyr·M/L; the habitable
+    // zone scales as √L; Wien's law gives the emission peak.
+    const logg = Number.isFinite(mass) && Number.isFinite(radius)
+      ? 4.438 + Math.log10(mass) - 2 * Math.log10(radius) : NaN;
+    const msLife = Number.isFinite(mass) && Number.isFinite(lum) ? (10 * mass) / lum : NaN; // Gyr
+    const hzAu = Number.isFinite(lum) ? Math.sqrt(lum) : NaN;
+    const peakNm = 2.898e6 / temp;
     const details: Array<[string, string]> = [
       ['Luminosity', `${fx(lum)} L☉`],
       ['Radius (est.)', `${fx(radius)} R☉`],
       ['Mass (est.)', `${fx(mass)} M☉`],
+      ['Surface gravity (est.)', Number.isFinite(logg) ? `log g ${logg.toFixed(2)}` : '—'],
+      ['MS lifetime (est.)', Number.isFinite(msLife)
+        ? msLife >= 1 ? `${msLife.toFixed(1)} Gyr` : `${Math.round(msLife * 1000)} Myr`
+        : '—'],
+      ['Habitable zone (est.)', Number.isFinite(hzAu) ? `~${hzAu < 0.1 ? hzAu.toFixed(3) : hzAu.toFixed(1)} AU` : '—'],
+      ['Peak emission', `${Math.round(peakNm)} nm · ${spectrumWord(peakNm)}`],
     ];
 
+    // designations link straight to SIMBAD under that identifier
+    const simbad = (ident: string): string =>
+      `<a href="https://simbad.u-strasbg.fr/simbad/sim-id?Ident=${encodeURIComponent(ident)}" target="_blank" rel="noopener">${ident} ↗</a>`;
     const names: Array<[string, string]> = [];
     const bayerName = prettyBayer(bayer, flam, con);
     if (bayerName) names.push(['Bayer/Flamsteed', bayerName]);
-    if (gl) names.push(['Gliese', gl]);
-    if (Number.isFinite(hip)) names.push(['Hipparcos', `HIP ${hip}`]);
-    if (Number.isFinite(hd)) names.push(['Henry Draper', `HD ${hd}`]);
-    if (Number.isFinite(hr)) names.push(['Bright Star', `HR ${hr}`]);
+    if (gl) names.push(['Gliese', simbad(gl)]);
+    if (Number.isFinite(hip)) names.push(['Hipparcos', simbad(`HIP ${hip}`)]);
+    if (Number.isFinite(hd)) names.push(['Henry Draper', simbad(`HD ${hd}`)]);
+    if (Number.isFinite(hr)) names.push(['Bright Star', simbad(`HR ${hr}`)]);
+
+    // the reference databases, like the wiki footer: SIMBAD, Exoplanet Archive, Wikipedia
+    const hasName = Boolean(named || titleOverride);
+    const bestId = Number.isFinite(hd) ? `HD ${hd}` : Number.isFinite(hip) ? `HIP ${hip}` : hasName ? title : '';
+    const databases: Array<[string, string]> = [];
+    if (bestId) databases.push(['SIMBAD', simbad(bestId).replace(`${bestId} ↗`, 'data ↗')]);
+    if (bestId) databases.push(['Exoplanet Archive',
+      `<a href="https://exoplanetarchive.ipac.caltech.edu/overview/${encodeURIComponent(exo ? title : bestId)}" target="_blank" rel="noopener">data ↗</a>`]);
+    if (hasName) databases.push(['Wikipedia',
+      `<a href="https://en.wikipedia.org/wiki/${encodeURIComponent(title.replaceAll(' ', '_'))}" target="_blank" rel="noopener">article ↗</a>`]);
 
     return {
       title, rows, blurb,
@@ -401,6 +439,7 @@ export class StarCatalog {
         { title: 'Astrometry', rows: astrometry },
         { title: 'Details', rows: details },
         ...(names.length ? [{ title: 'Designations', rows: names }] : []),
+        ...(databases.length ? [{ title: 'Databases', rows: databases }] : []),
       ],
     };
   }
@@ -437,6 +476,40 @@ function prettyBayer(bayer: string, flam: string, con: string): string {
   const sup = ['', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'];
   const g = m ? (GREEK[m[1]!] ?? bayer) + (m[2] ? sup[Number(m[2])]! : '') : bayer;
   return [flam, g, con].filter(Boolean).join(' ');
+}
+
+/** Common names → HIP numbers, for stars the HYG proper-name column calls something
+ *  else (Rigil Kentaurus) or nothing at all (Tau Ceti) — used by cardByName so the
+ *  hand-placed divable stars still resolve to their full catalogue record. */
+const ALIAS_HIP: Record<string, number> = {
+  'Alpha Centauri': 71683,
+  'Tau Ceti': 8102,
+  'Epsilon Eridani': 16537,
+  '61 Cygni': 104214,
+  'Procyon': 37279,
+  'Sirius': 32349,
+  'Vega': 91262,
+  'Altair': 97649,
+  'Pollux': 37826,
+  'Fomalhaut': 113368,
+};
+
+/** catalogue display names whose exoplanet-host entry is filed under another name */
+const EXO_TITLE_ALIAS: Record<string, string> = {
+  'Rigil Kentaurus': 'Alpha Centauri',
+};
+
+/** where a Wien-peak wavelength falls in the spectrum, in words */
+function spectrumWord(nm: number): string {
+  if (nm < 300) return 'ultraviolet';
+  if (nm < 380) return 'near-UV';
+  if (nm < 450) return 'violet-blue';
+  if (nm < 495) return 'blue';
+  if (nm < 570) return 'green';
+  if (nm < 590) return 'yellow';
+  if (nm < 620) return 'orange';
+  if (nm < 750) return 'red';
+  return 'infrared';
 }
 
 /** MK luminosity-class → evolutionary stage. Case-SENSITIVE first match, longest

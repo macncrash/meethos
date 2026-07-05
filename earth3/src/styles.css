@@ -83,6 +83,8 @@ html, body {
 }
 #inspector .row { display: flex; justify-content: space-between; gap: 12px; color: var(--ink-dim); }
 #inspector .row b { color: var(--ink); font-weight: 500; }
+#inspector a { color: var(--accent2); text-decoration: none; }
+#inspector a:hover { color: var(--accent); text-decoration: underline; }
 #inspector .blurb { margin-top: 8px; color: var(--ink-dim); font-size: 11px; line-height: 1.55; }
 
 /* HUD */
