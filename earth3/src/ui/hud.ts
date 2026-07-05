@@ -30,6 +30,8 @@ export class Hud {
   private readonly gameover = byId('gameover');
   private readonly gameoverText = byId('gameover-text');
   private toastTimer = 0;
+  private lastInspectorHtml = '';
+  private pendingLink: string | null = null;
 
   constructor(
     private readonly clock: SimClock,
@@ -50,12 +52,24 @@ export class Hud {
       if (this.manager.mergerActive) this.showToast('⟳ The Milky Way and Andromeda collide — ~4.5 Gyr from now', 3600);
     });
     byId('restart-btn').addEventListener('click', () => this.startGame());
-    // sector links inside the (re-rendered-every-frame) inspector: one delegated handler
+    // delegated inspector interactions: sector links + external database links.
+    // The href is LATCHED on pointerdown — if a live-value re-render replaces the
+    // anchor mid-click, the click still opens the right page.
+    this.inspector.addEventListener('pointerdown', (e) => {
+      const a = (e.target as HTMLElement).closest('a[href]');
+      this.pendingLink = a ? (a as HTMLAnchorElement).href : null;
+    });
     this.inspector.addEventListener('click', (e) => {
-      const a = (e.target as HTMLElement).closest('[data-sector]');
-      if (!a) return;
-      const [sx, sy, sz] = (a.getAttribute('data-sector') ?? '').split(',').map(Number);
-      if ([sx, sy, sz].every(Number.isFinite)) this.manager.goToSector?.(sx!, sy!, sz!);
+      const sec = (e.target as HTMLElement).closest('[data-sector]');
+      if (sec) {
+        const [sx, sy, sz] = (sec.getAttribute('data-sector') ?? '').split(',').map(Number);
+        if ([sx, sy, sz].every(Number.isFinite)) this.manager.goToSector?.(sx!, sy!, sz!);
+        this.pendingLink = null;
+        return;
+      }
+      const a = (e.target as HTMLElement).closest('a[href]');
+      if (!a && this.pendingLink) window.open(this.pendingLink, '_blank', 'noopener'); // the re-render ate the anchor
+      this.pendingLink = null;
     });
     bus.onImpact((e) => {
       const sev = e.energy > 0.75 ? 'Catastrophic' : e.energy > 0.5 ? 'Major' : 'Significant';
@@ -225,8 +239,14 @@ export class Hud {
         `<h4>${sec.title}</h4>` +
         sec.rows.map(([k, v]) => `<div class="row"><span>${k}</span><b>${v}</b></div>`).join(''))
       .join('');
-    this.inspector.innerHTML =
+    const html =
       `<h3>${info.title}</h3>${rows}${sections}` + (info.blurb ? `<div class="blurb">${info.blurb}</div>` : '');
+    // only touch the DOM when the card CHANGED — a per-frame innerHTML rewrite destroys
+    // the anchor between mousedown and mouseup, so links could never be clicked
+    if (html !== this.lastInspectorHtml) {
+      this.lastInspectorHtml = html;
+      this.inspector.innerHTML = html;
+    }
 
     // compact stat line = the first two rows of the focused body
     this.stats.innerHTML = info.rows
