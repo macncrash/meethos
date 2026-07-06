@@ -487,6 +487,7 @@ export class StarCatalog {
 
     return {
       title, rows, blurb,
+      image: `https://alasky.cds.unistra.fr/hips-image-services/hips2fits?hips=CDS%2FP%2FDSS2%2Fcolor&ra=${(raH * 15).toFixed(4)}&dec=${decDeg.toFixed(4)}&fov=0.5&width=220&height=150&format=jpg`,
       sections: [
         { title: 'Observation (J2000)', rows: observation },
         { title: 'Characteristics', rows: characteristics },

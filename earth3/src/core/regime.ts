@@ -10,6 +10,8 @@ export interface InspectorInfo {
   title: string;
   rows: Array<[string, string]>;
   blurb?: string;
+  /** optional survey photo (hips2fits cutout) shown at the top of the card — online only */
+  image?: string;
   /** optional titled panels below the main rows — the full astronomical data card */
   sections?: Array<{ title: string; rows: Array<[string, string]> }>;
 }

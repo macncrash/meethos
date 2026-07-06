@@ -239,8 +239,11 @@ export class Hud {
         `<h4>${sec.title}</h4>` +
         sec.rows.map(([k, v]) => `<div class="row"><span>${k}</span><b>${v}</b></div>`).join(''))
       .join('');
+    const img = info.image
+      ? `<img src="${info.image}" loading="lazy" alt="" onerror="this.hidden=true" />`
+      : '';
     const html =
-      `<h3>${info.title}</h3>${rows}${sections}` + (info.blurb ? `<div class="blurb">${info.blurb}</div>` : '');
+      `<h3>${info.title}</h3>${img}${rows}${sections}` + (info.blurb ? `<div class="blurb">${info.blurb}</div>` : '');
     // only touch the DOM when the card CHANGED — a per-frame innerHTML rewrite destroys
     // the anchor between mousedown and mouseup, so links could never be clicked
     if (html !== this.lastInspectorHtml) {

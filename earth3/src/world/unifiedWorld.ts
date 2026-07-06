@@ -60,6 +60,7 @@ import { StarCatalog } from './starCatalog';
 import { ConstellationFigures } from './constellationFigures';
 import { DeepSky } from './deepSky';
 import { MOONS, MOON_COUNTS, KM_PER_AU, moonLocalPosition, type MoonData } from '../data/moons';
+import { TleShell } from './tleShell';
 import { OrbitalShell, SAT_SHOW_AU } from './orbitalShell';
 import { planMission, transferArc, shipPosition, type MissionPlan } from '../core/mission';
 import { PlanetSurfaces } from './planetSurfaces';
@@ -281,6 +282,7 @@ export class UnifiedWorld implements WorldFacade {
   private readonly moonBodies: { m: MoonData; parent: Body; parentLabel: string; body: Body; target: FocusTarget }[] = [];
   // Layer 6: Earth's orbital shell — named craft + debris clouds (constructed after earthBody)
   private readonly orbitalShell: OrbitalShell;
+  readonly tleShell = new TleShell();
   // true-scale lit globes for planets + major moons (Earth/Luna keep their regime meshes)
   private readonly surfaces = new PlanetSurfaces();
   private readonly surfaceBodies = new Map<string, Body>(); // globe id → its marker body
@@ -474,6 +476,9 @@ export class UnifiedWorld implements WorldFacade {
     // Earth-centred; the group is placed at Earth's camera-relative position each frame
     this.orbitalShell = new OrbitalShell(() => this.earthBody.world);
     scene.add(this.orbitalShell.group);
+    // the REAL Starlink shell — live TLEs propagated with SGP4 (loads async)
+    scene.add(this.tleShell.group);
+    void this.tleShell.load();
 
     // true-scale textured globes for every planet (Earth keeps its living regime globe)
     // and major moon (Luna keeps the regime's mesh) — "what does Mars LOOK like"
@@ -656,6 +661,7 @@ export class UnifiedWorld implements WorldFacade {
     this.earth.object3d.visible = false;
     this.surface.object3d.visible = false;
     this.orbitalShell.group.visible = false;
+    this.tleShell.group.visible = false;
     this.surfaces.setAllHidden();
     for (const l of this.selLabels) l.sprite.visible = false; // the merger owns the view
     for (const b of this.bodies) { b.dot.visible = false; b.label.visible = false; }
@@ -1020,6 +1026,8 @@ export class UnifiedWorld implements WorldFacade {
     this.orbitalShell.step(seconds, this.clock.dt);
     this.orbitalShell.setVisibility(earthCamDist, seconds);
     if (this.orbitalShell.group.visible) this.fo.place(this.orbitalShell.group, earthWorld);
+    // the real Starlink constellation shares the orbital shell's visibility band
+    this.tleShell.update(this.fo, earthWorld, seconds, this.orbitalShell.group.visible);
 
     // reference rings (centred on the Sun = origin), fading by zoom band
     for (const ring of this.rings) {

@@ -149,8 +149,10 @@ export class DeepSky {
     const wiki = `<a href="https://en.wikipedia.org/wiki/${encodeURIComponent(o.name.replace(/ \(.*\)$/, '').replaceAll(' ', '_'))}" target="_blank" rel="noopener">article ↗</a>`;
     const simbadName = /\((M\d+)\)/.exec(o.name)?.[1] ?? o.name;
     const simbad = `<a href="https://simbad.u-strasbg.fr/simbad/sim-id?Ident=${encodeURIComponent(simbadName)}" target="_blank" rel="noopener">data ↗</a>`;
+    const fovDeg = Math.max(0.08, (o.sizeArcmin / 60) * 2);
     return {
       title: o.name,
+      image: `https://alasky.cds.unistra.fr/hips-image-services/hips2fits?hips=CDS%2FP%2FDSS2%2Fcolor&ra=${(o.raH * 15).toFixed(4)}&dec=${o.decDeg.toFixed(4)}&fov=${fovDeg.toFixed(3)}&width=220&height=150&format=jpg`,
       rows: [
         ['Distance', dist],
         ['App. mag', o.mag.toFixed(1)],
