@@ -23,6 +23,7 @@ import {
   SRGBColorSpace,
   Vector3,
 } from 'three';
+import { TextureLoader } from 'three';
 import { mulberry32 } from '../core/rng';
 import type { FloatingOrigin } from '../meethos/floatingOrigin';
 
@@ -232,6 +233,19 @@ export interface SurfaceEntry {
   visible: boolean;
 }
 
+/** real equirect photo maps (Solar System Scope, CC-BY 4.0) served from public/ —
+ *  present in hosted/dev builds, absent from the offline single-file (procedural fallback) */
+const REAL_TEX: Record<string, string> = {
+  mercury: 'textures/2k_mercury.jpg',
+  venus: 'textures/2k_venus_atmosphere.jpg',
+  mars: 'textures/2k_mars.jpg',
+  jupiter: 'textures/2k_jupiter.jpg',
+  saturn: 'textures/2k_saturn.jpg',
+  uranus: 'textures/2k_uranus.jpg',
+  neptune: 'textures/2k_neptune.jpg',
+};
+const texLoader = new TextureLoader();
+
 export class PlanetSurfaces {
   readonly group = new Group();
   readonly entries: SurfaceEntry[] = [];
@@ -277,6 +291,17 @@ export class PlanetSurfaces {
     }
     this.group.add(mesh);
     this.entries.push({ id, radiusAU, world, parentWorld, rotationHours, mesh, visible: false });
+    // upgrade to the real photographic map when it's available (hosted builds);
+    // the procedural texture remains the offline fallback
+    const real = REAL_TEX[id];
+    if (real) {
+      texLoader.load(real, (t) => {
+        t.colorSpace = SRGBColorSpace;
+        const m = mesh.material as MeshStandardMaterial;
+        m.map = t;
+        m.needsUpdate = true;
+      }, undefined, () => { /* keep procedural */ });
+    }
   }
 
   /** per-frame: show globes near the camera, spin them, aim the shared sun light */

@@ -59,6 +59,7 @@ import { CosmicWeb } from './cosmicWeb';
 import { StarCatalog } from './starCatalog';
 import { ConstellationFigures } from './constellationFigures';
 import { DeepSky } from './deepSky';
+import { FaintStars } from './faintStars';
 import { MOONS, MOON_COUNTS, KM_PER_AU, moonLocalPosition, type MoonData } from '../data/moons';
 import { TleShell } from './tleShell';
 import { OrbitalShell, SAT_SHOW_AU } from './orbitalShell';
@@ -315,6 +316,7 @@ export class UnifiedWorld implements WorldFacade {
   private readonly starCatalog = new StarCatalog();
   private readonly constellations = new ConstellationFigures();
   private readonly deepSky = new DeepSky();
+  private readonly faintStars = new FaintStars(); // telescope tier — lazy, observer-mode only
 
   // Layer 3 — the Milky Way × Andromeda merger (a live restricted N-body sim), shown
   // as a self-contained Cosmos-band overlay when toggled.
@@ -524,6 +526,7 @@ export class UnifiedWorld implements WorldFacade {
     // the bright deep sky — M31, the Magellanic Clouds, the great nebulae + clusters at
     // their TRUE positions and TRUE spans (rebased like the star catalogue)
     scene.add(this.deepSky.group);
+    scene.add(this.faintStars.group);
 
     // the galaxy-merger overlay (hidden until toggled)
     this.merger.group.visible = false;
@@ -955,6 +958,8 @@ export class UnifiedWorld implements WorldFacade {
       this.observerWorld.copy(this.observerGet!());
       this.fo.camWorld.copy(this.observerWorld);
       this.starCatalog.setObserver(this.observerWorld);
+      this.faintStars.load(); // first observer entry pulls the telescope tier (~99k stars)
+      this.faintStars.setObserver(this.observerWorld);
     } else {
       // the camera orbits + looks at the focus point (default the Sun at the origin)
       if (this.focusGet) this.focusWorld.copy(this.focusGet());
@@ -997,6 +1002,11 @@ export class UnifiedWorld implements WorldFacade {
     // the deep sky rides along — hidden at the Cosmos band (the stylized web takes over)
     this.deepSky.group.visible = !showCosmos;
     if (!showCosmos) this.deepSky.group.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
+
+    // the telescope tier shows only while OBSERVING — stand somewhere and the sky
+    // deepens 12× past the naked eye
+    this.faintStars.group.visible = observer && !showCosmos;
+    if (this.faintStars.group.visible) this.faintStars.group.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
 
     // constellation figures ride no origin (they are directions): shown only when observing
     // and a constellation is selected — from Earth/near-Sun they lie on the real stars.

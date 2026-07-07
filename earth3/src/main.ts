@@ -25,6 +25,7 @@ import { UnifiedWorld, type SearchEntry } from './world/unifiedWorld';
 import { DefenseGame } from './world/defenseGame';
 import { Hud } from './ui/hud';
 import { createBackdropStars } from './render/backdrop';
+import { COASTLINES } from './data/worldCoast';
 
 // The unified single floating-origin frame is now the DEFAULT world. `?legacy`
 // boots the old ScaleManager cross-fade path — kept as an escape hatch until the
@@ -308,14 +309,106 @@ document.getElementById('sky-aim')?.addEventListener('click', () => {
   }
 });
 
+// ---- 'today' — anchor the sim to the real present ----
+document.getElementById('today-btn')?.addEventListener('click', () => {
+  simClock.seconds = (Date.now() - J2000_UTC_MS) / 1000;
+  simClock.direction = 1;
+});
+
 // ---- sky panel place picker: choose a city, stand there, see tonight's sky ----
 const SKY_CITIES: Array<[string, number, number]> = [
-  ['New York', 40.71, -74.01], ['London', 51.51, -0.13], ['Paris', 48.86, 2.35],
-  ['Tokyo', 35.68, 139.69], ['Beijing', 39.9, 116.41], ['Delhi', 28.61, 77.21],
-  ['Moscow', 55.76, 37.62], ['Cairo', 30.04, 31.24], ['Nairobi', -1.29, 36.82],
-  ['Sydney', -33.87, 151.21], ['Cape Town', -33.92, 18.42], ['Sao Paulo', -23.55, -46.63],
-  ['Mexico City', 19.43, -99.13], ['Honolulu', 21.31, -157.86], ['Reykjavik', 64.15, -21.94],
+  ['New York', 40.71, -74.01],
+  ['Los Angeles', 34.05, -118.24],
+  ['Chicago', 41.88, -87.63],
+  ['Houston', 29.76, -95.37],
+  ['Toronto', 43.65, -79.38],
+  ['Vancouver', 49.28, -123.12],
+  ['Mexico City', 19.43, -99.13],
+  ['Havana', 23.11, -82.37],
+  ['Bogota', 4.71, -74.07],
+  ['Lima', -12.05, -77.04],
+  ['Quito', -0.18, -78.47],
+  ['Santiago', -33.45, -70.67],
+  ['Buenos Aires', -34.6, -58.38],
+  ['Sao Paulo', -23.55, -46.63],
+  ['Rio de Janeiro', -22.91, -43.17],
+  ['Caracas', 10.48, -66.9],
+  ['Reykjavik', 64.15, -21.94],
+  ['Dublin', 53.35, -6.26],
+  ['London', 51.51, -0.13],
+  ['Paris', 48.86, 2.35],
+  ['Madrid', 40.42, -3.7],
+  ['Lisbon', 38.72, -9.14],
+  ['Rome', 41.9, 12.5],
+  ['Berlin', 52.52, 13.4],
+  ['Amsterdam', 52.37, 4.9],
+  ['Stockholm', 59.33, 18.07],
+  ['Oslo', 59.91, 10.75],
+  ['Helsinki', 60.17, 24.94],
+  ['Warsaw', 52.23, 21.01],
+  ['Vienna', 48.21, 16.37],
+  ['Athens', 37.98, 23.73],
+  ['Istanbul', 41.01, 28.98],
+  ['Moscow', 55.76, 37.62],
+  ['Kyiv', 50.45, 30.52],
+  ['Cairo', 30.04, 31.24],
+  ['Casablanca', 33.57, -7.59],
+  ['Lagos', 6.52, 3.38],
+  ['Accra', 5.6, -0.19],
+  ['Nairobi', -1.29, 36.82],
+  ['Addis Ababa', 9.03, 38.74],
+  ['Kinshasa', -4.44, 15.27],
+  ['Johannesburg', -26.2, 28.05],
+  ['Cape Town', -33.92, 18.42],
+  ['Antananarivo', -18.88, 47.51],
+  ['Dubai', 25.2, 55.27],
+  ['Riyadh', 24.71, 46.68],
+  ['Tehran', 35.69, 51.39],
+  ['Baghdad', 33.31, 44.36],
+  ['Jerusalem', 31.77, 35.21],
+  ['Karachi', 24.86, 67.01],
+  ['Mumbai', 19.08, 72.88],
+  ['Delhi', 28.61, 77.21],
+  ['Bengaluru', 12.97, 77.59],
+  ['Colombo', 6.93, 79.85],
+  ['Kathmandu', 27.72, 85.32],
+  ['Dhaka', 23.81, 90.41],
+  ['Bangkok', 13.76, 100.5],
+  ['Hanoi', 21.03, 105.85],
+  ['Singapore', 1.35, 103.82],
+  ['Jakarta', -6.21, 106.85],
+  ['Manila', 14.6, 120.98],
+  ['Hong Kong', 22.32, 114.17],
+  ['Taipei', 25.03, 121.57],
+  ['Shanghai', 31.23, 121.47],
+  ['Beijing', 39.9, 116.41],
+  ['Seoul', 37.57, 126.98],
+  ['Tokyo', 35.68, 139.69],
+  ['Osaka', 34.69, 135.5],
+  ['Ulaanbaatar', 47.89, 106.91],
+  ['Almaty', 43.24, 76.89],
+  ['Novosibirsk', 55.03, 82.92],
+  ['Vladivostok', 43.12, 131.89],
+  ['Perth', -31.95, 115.86],
+  ['Adelaide', -34.93, 138.6],
+  ['Melbourne', -37.81, 144.96],
+  ['Sydney', -33.87, 151.21],
+  ['Brisbane', -27.47, 153.03],
+  ['Auckland', -36.85, 174.76],
+  ['Wellington', -41.29, 174.78],
+  ['Suva', -18.14, 178.44],
+  ['Honolulu', 21.31, -157.86],
+  ['Anchorage', 61.22, -149.9],
+  ['Nuuk', 64.18, -51.72],
+  ['Longyearbyen', 78.22, 15.65],
+  ['Ushuaia', -54.8, -68.3],
   ['McMurdo Station', -77.85, 166.67],
+  ['South Pole', -89.99, 0.0],
+  ['Mauna Kea', 19.82, -155.47],
+  ['Atacama (ALMA)', -23.03, -67.75],
+  ['La Palma (Roque)', 28.76, -17.89],
+  ['Greenwich', 51.48, 0.0],
+  ['Timbuktu', 16.77, -3.01],
 ];
 {
   const citySel = document.getElementById('sky-city') as HTMLSelectElement | null;
@@ -337,6 +430,59 @@ const SKY_CITIES: Array<[string, number, number]> = [
       (document.getElementById('sky-stand') as HTMLButtonElement | null)?.click();
     });
   }
+}
+
+// ---- world map: click to pin a ground location ----
+{
+  const dlg = document.getElementById('geomap');
+  const cv = document.getElementById('geomap-canvas') as HTMLCanvasElement | null;
+  let pin: [number, number] | null = null;
+  function drawMap(): void {
+    if (!cv) return;
+    const g = cv.getContext('2d')!;
+    const W = cv.width, H = cv.height;
+    g.clearRect(0, 0, W, H);
+    g.strokeStyle = 'rgba(122,168,255,0.16)';
+    g.lineWidth = 1;
+    for (let lon = -180; lon <= 180; lon += 30) { const x = ((lon + 180) / 360) * W; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
+    for (let lat = -60; lat <= 60; lat += 30) { const y = ((90 - lat) / 180) * H; g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); }
+    g.strokeStyle = '#7aa8ff';
+    g.lineWidth = 1.1;
+    for (const ring of COASTLINES) {
+      g.beginPath();
+      for (let i = 0; i + 1 < ring.length; i += 2) {
+        const x = ((ring[i]! + 180) / 360) * W;
+        const y = ((90 - ring[i + 1]!) / 180) * H;
+        if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+      }
+      g.stroke();
+    }
+    g.fillStyle = '#ffd98a';
+    for (const [, la, lo] of SKY_CITIES) g.fillRect(((lo + 180) / 360) * W - 1, ((90 - la) / 180) * H - 1, 2, 2);
+    if (pin) {
+      const x = ((pin[1] + 180) / 360) * W, y = ((90 - pin[0]) / 180) * H;
+      g.strokeStyle = '#4ad6c8'; g.lineWidth = 1.5;
+      g.beginPath(); g.arc(x, y, 7, 0, Math.PI * 2); g.stroke();
+      g.beginPath(); g.moveTo(x - 11, y); g.lineTo(x + 11, y); g.moveTo(x, y - 11); g.lineTo(x, y + 11); g.stroke();
+    }
+  }
+  document.getElementById('sky-map')?.addEventListener('click', () => { if (dlg) { dlg.hidden = false; drawMap(); } });
+  document.getElementById('geomap-close')?.addEventListener('click', () => { if (dlg) dlg.hidden = true; });
+  cv?.addEventListener('click', (e) => {
+    const r = cv.getBoundingClientRect();
+    if (r.width < 10 || r.height < 10) return; // zero-size viewport (collapsed panel) — no geometry to pick against
+    const lon = ((e.clientX - r.left) / r.width) * 360 - 180;
+    const lat = 90 - ((e.clientY - r.top) / r.height) * 180;
+    pin = [lat, lon];
+    drawMap();
+    const latEl = document.getElementById('sky-lat') as HTMLInputElement | null;
+    const lonEl = document.getElementById('sky-lon') as HTMLInputElement | null;
+    if (latEl) latEl.value = lat.toFixed(2);
+    if (lonEl) lonEl.value = lon.toFixed(2);
+    const note = document.getElementById('geomap-note');
+    if (note) note.textContent = `Standing at ${lat.toFixed(1)}°, ${lon.toFixed(1)}° — close the map to look around.`;
+    (document.getElementById('sky-stand') as HTMLButtonElement | null)?.click();
+  });
 }
 
 // ---- interstellar escape: real physics from here to the nearest stars ----

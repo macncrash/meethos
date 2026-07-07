@@ -47,7 +47,7 @@
       <div class="rp-head"><span>⌖ What is that?</span><button id="sky-close" title="Close">✕</button></div>
       <div class="sky-row">
         <span class="sky-cap">Place</span>
-        <select id="sky-city" aria-label="Choose a place on Earth"><option value="">custom…</option></select>
+        <select id="sky-city" aria-label="Choose a place on Earth"><option value="">custom…</option></select><button id="sky-map" title="Pick a spot on the world map">🗺</button>
       </div>
       <div class="sky-row">
         <span class="sky-cap">Ground</span>
@@ -70,6 +70,12 @@
         <button id="sky-aim">⌖ What is that?</button>
       </div>
       <div id="sky-result" hidden></div>
+    </div>
+    <!-- world map: click to pin your ground location -->
+    <div id="geomap" hidden role="dialog" aria-label="Pick a location on Earth">
+      <div class="rp-head"><span>🗺 Pick your spot</span><button id="geomap-close" title="Close">✕</button></div>
+      <canvas id="geomap-canvas" width="720" height="360"></canvas>
+      <div class="mission-note" id="geomap-note">Click anywhere — dots are cities. You'll stand there under that sky.</div>
     </div>
     <div id="search" hidden role="dialog" aria-label="Search destinations">
       <input id="search-input" type="text" autocomplete="off" spellcheck="false" placeholder="Go to a planet, star or galaxy…" />
@@ -122,7 +128,7 @@
       <div id="clock">
         <span id="era" class="era">—</span>
         <span id="stardate" class="stardate" title="Elapsed sim time — Day 0 is the J2000 epoch (2000-01-01), not the Big Bang">—</span>
-        <input id="realdate" class="realdate" title="Real calendar (epoch J2000) — type a date (2049-07-20), a year (1969, -10000), Enter to jump" spellcheck="false" />
+        <span class="daterow"><button id="today-btn" title="Jump to the real present — today's planets, tonight's sky">today</button><input id="realdate" class="realdate" title="Real calendar (epoch J2000) — type a date (2049-07-20), a year (1969, -10000), Enter to jump" spellcheck="false" /></span>
       </div>
       <div id="transport">
         <button data-rate="pause" title="Pause">❚❚</button>
