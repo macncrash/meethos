@@ -60,6 +60,8 @@ import { StarCatalog } from './starCatalog';
 import { ConstellationFigures } from './constellationFigures';
 import { DeepSky } from './deepSky';
 import { FaintStars } from './faintStars';
+import { NgcSky } from './ngcSky';
+import { HipsSky } from './hipsSky';
 import { MOONS, MOON_COUNTS, KM_PER_AU, moonLocalPosition, type MoonData } from '../data/moons';
 import { TleShell } from './tleShell';
 import { OrbitalShell, SAT_SHOW_AU } from './orbitalShell';
@@ -317,6 +319,8 @@ export class UnifiedWorld implements WorldFacade {
   private readonly constellations = new ConstellationFigures();
   private readonly deepSky = new DeepSky();
   private readonly faintStars = new FaintStars(); // telescope tier — lazy, observer-mode only
+  private readonly ngcSky = new NgcSky(); // the full NGC/IC — direction layer, observer-mode
+  private readonly hipsSky = new HipsSky(); // the photographed sky — observer-mode backdrop
 
   // Layer 3 — the Milky Way × Andromeda merger (a live restricted N-body sim), shown
   // as a self-contained Cosmos-band overlay when toggled.
@@ -527,6 +531,8 @@ export class UnifiedWorld implements WorldFacade {
     // their TRUE positions and TRUE spans (rebased like the star catalogue)
     scene.add(this.deepSky.group);
     scene.add(this.faintStars.group);
+    scene.add(this.ngcSky.group);
+    scene.add(this.hipsSky.group);
 
     // the galaxy-merger overlay (hidden until toggled)
     this.merger.group.visible = false;
@@ -960,6 +966,8 @@ export class UnifiedWorld implements WorldFacade {
       this.starCatalog.setObserver(this.observerWorld);
       this.faintStars.load(); // first observer entry pulls the telescope tier (~99k stars)
       this.faintStars.setObserver(this.observerWorld);
+      this.ngcSky.load(); // …and the full NGC/IC direction layer
+      this.hipsSky.load(); // …and the photographed all-sky backdrop
     } else {
       // the camera orbits + looks at the focus point (default the Sun at the origin)
       if (this.focusGet) this.focusWorld.copy(this.focusGet());
@@ -1007,6 +1015,12 @@ export class UnifiedWorld implements WorldFacade {
     // deepens 12× past the naked eye
     this.faintStars.group.visible = observer && !showCosmos;
     if (this.faintStars.group.visible) this.faintStars.group.position.set(-this.fo.camWorld.x, -this.fo.camWorld.y, -this.fo.camWorld.z);
+
+    // NGC/IC + the photographed sky are direction layers (NOT rebased) — observer only,
+    // and only from a near-Sun vantage where fixed directions are honest
+    const nearSun = this.fo.camWorld.length() < OBSERVER_SOLAR_AU;
+    this.ngcSky.group.visible = observer && !showCosmos && nearSun;
+    this.hipsSky.group.visible = observer && !showCosmos && nearSun;
 
     // constellation figures ride no origin (they are directions): shown only when observing
     // and a constellation is selected — from Earth/near-Sun they lie on the real stars.
@@ -1339,7 +1353,8 @@ export class UnifiedWorld implements WorldFacade {
     if (bestSel >= 0) return this.starCatalog.targetOf(bestSel);
     return (
       this.starCatalog.pickTarget(ndcX, ndcY, this.camera, this.fo.camWorld) ??
-      this.deepSky.pickTarget(ndcX, ndcY, this.camera, this.fo.camWorld)
+      this.deepSky.pickTarget(ndcX, ndcY, this.camera, this.fo.camWorld) ??
+      this.ngcSky.pickTarget(ndcX, ndcY, this.camera, this.fo.camWorld)
     );
   }
 
