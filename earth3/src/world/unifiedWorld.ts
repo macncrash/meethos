@@ -842,6 +842,9 @@ export class UnifiedWorld implements WorldFacade {
   /** label density from the bottom-left slider (0 = hover-only "explorer" mode). */
   setMaxLabels(n: number): void {
     this.maxLabels = Math.max(0, n);
+    // the label slider doubles as Earth's DETAIL dial: more labels = deeper into the
+    // real-city population ranking on the globe
+    this.earth.setCityDetail(n === 0 ? 0 : Math.min(60, Math.max(6, n * 2)));
   }
 
   /** the pointer-hovered object; its name is always shown regardless of density. */

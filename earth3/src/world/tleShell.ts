@@ -43,7 +43,7 @@ export class TleShell {
     const pos = new Float32Array(this.count * 3).fill(HIDE);
     this.geom = new BufferGeometry();
     this.geom.setAttribute('position', new BufferAttribute(pos, 3));
-    const pts = new Points(this.geom, new PointsMaterial({ color: 0x9fe8ff, size: 2.5, sizeAttenuation: false, transparent: true, opacity: 0.85, depthWrite: false }));
+    const pts = new Points(this.geom, new PointsMaterial({ color: 0x9fe8ff, size: 1.6, sizeAttenuation: false, transparent: true, opacity: 0.5, depthWrite: false }));
     pts.frustumCulled = false;
     this.group.add(pts);
   }

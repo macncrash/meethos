@@ -25,6 +25,8 @@ import {
   SpriteMaterial,
   SphereGeometry,
   Vector3,
+  TextureLoader,
+  SRGBColorSpace,
 } from 'three';
 import type { SimClock } from '../core/clock';
 import type { FocusTarget, Regime } from '../core/regime';
@@ -32,6 +34,9 @@ import { SECONDS_PER_DAY } from '../core/units';
 import { glowTexture, dotTexture } from '../render/sprites';
 import { setOpacityDeep } from '../render/opacity';
 import { createGlowPointsMaterial } from '../render/pointsMaterial';
+import { gmstRad } from '../meethos/frames';
+import { CITIES } from '../data/cities';
+import { makeLabel } from '../render/label';
 import { PlanetField } from '../world/planetField';
 import { Civilization, eraColor, MAX_SETTLEMENTS } from '../sim/civilization';
 import { planetPosition } from './data/kepler';
@@ -88,6 +93,12 @@ export class EarthRegime implements Regime {
   private readonly craters: Mesh[] = [];
   private readonly shocks: Shockwave[] = [];
   private lastImpact: { energy: number; killed: number; atYear: number } | null = null;
+  private cityPoints: Points | null = null;
+  private readonly cityLabels: Sprite[] = [];
+  private cityDetail = 12;
+  private readonly cityTmp = new Vector3();
+  private readonly globeCenterTmp = new Vector3();
+  private readonly camDirTmp = new Vector3();
 
   constructor(bus: WorldBus) {
     this.civ = new Civilization(this.field);
@@ -101,8 +112,17 @@ export class EarthRegime implements Regime {
       new SphereGeometry(GLOBE_R, 64, 48),
       new MeshStandardMaterial({ map: this.field.texture(), roughness: 1, metalness: 0 }),
     );
+    this.loadRealEarth();
+    // TRUE orientation: the spin axis points at the real celestial pole (render frame
+    // (0, cos ε, sin ε)) and the spin angle is GMST — so the continents under you match
+    // the standAt/groundDir math exactly, longitude for longitude.
     const tilt = new Group();
-    tilt.rotation.z = AXIAL_TILT;
+    {
+      const ce = Math.cos(AXIAL_TILT);
+      const se = Math.sin(AXIAL_TILT);
+      tilt.matrixAutoUpdate = false;
+      tilt.matrix.makeBasis(new Vector3(1, 0, 0), new Vector3(0, ce, se), new Vector3(0, -se, ce));
+    }
     tilt.add(this.globe);
     this.object3d.add(tilt);
 
@@ -219,12 +239,16 @@ export class EarthRegime implements Regime {
 
     this.animateShocks(clock.realDt);
 
-    // globe spins once per sidereal day about its tilted axis
-    this.globe.rotation.y = (clock.seconds / SECONDS_PER_DAY) * Math.PI * 2;
+    // globe spins about the true pole; GMST keeps texture longitudes honest
+    this.globe.rotation.y = -gmstRad(clock.seconds); // negative: the mirrored-texture convention
 
     // Sun direction from Earth's REAL heliocentric position → moving terminator + seasons
     planetPosition(EARTH_DATA, clock.seconds, this.sunDir).negate().normalize();
     this.sunLight.position.copy(this.sunDir).multiplyScalar(10);
+
+    // city labels: top-N by population, camera-side hemisphere only. The floating
+    // origin puts the CAMERA at scene (0,0,0), so the direction to it is −globeCentre.
+    this.updateCityLabels(this.camDirTmp.setFromMatrixPosition(this.globe.matrixWorld).normalize());
 
     // moon orbit — same tilted-circle form as data/moons.ts moonLocalPosition()
     const ma = this.moonPhase + (clock.seconds / this.moonPeriodSec) * Math.PI * 2;
@@ -290,6 +314,104 @@ export class EarthRegime implements Regime {
     this.shocks.push({ mesh: ring, age: 0, life: 2.2 });
 
     this.refreshCivBuffers();
+  }
+
+  /** swap the procedural surface for NASA's Blue Marble + night lights when the maps
+   *  are available (hosted builds); the classic day/night terminator shader mixes them
+   *  along the REAL sun direction. Offline the procedural globe remains. */
+  private loadRealEarth(): void {
+    const loader = new TextureLoader();
+    loader.load('textures/earth_atmos_2048.jpg', (day) => {
+      loader.load('textures/earth_lights_2048.png', (night) => {
+        day.colorSpace = SRGBColorSpace;
+        night.colorSpace = SRGBColorSpace;
+        const mat = new ShaderMaterial({
+          uniforms: { uDay: { value: day }, uNight: { value: night }, uSunDir: { value: this.sunDir } },
+          vertexShader: /* glsl */ `
+            varying vec2 vUv;
+            varying vec3 vN;
+            void main() {
+              vUv = uv;
+              vN = normalize(mat3(modelMatrix) * normal);
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }`,
+          fragmentShader: /* glsl */ `
+            precision highp float;
+            uniform sampler2D uDay;
+            uniform sampler2D uNight;
+            uniform vec3 uSunDir;
+            varying vec2 vUv;
+            varying vec3 vN;
+            void main() {
+              // the render frame is left-handed wrt equatorial — longitude mirrors in
+              // texture space so a PROPER rotation can orient the ball (u flip here)
+              vec2 uv2 = vec2(1.0 - vUv.x, vUv.y);
+              float d = dot(normalize(vN), normalize(uSunDir));
+              float t = smoothstep(-0.08, 0.25, d);
+              vec3 day = texture2D(uDay, uv2).rgb * (0.16 + 1.05 * max(d, 0.0));
+              vec3 night = texture2D(uNight, uv2).rgb * 1.7;
+              gl_FragColor = vec4(mix(night, day, t), 1.0);
+            }`,
+        });
+        this.globe.material = mat;
+        this.buildCityLayer();
+      });
+    }, undefined, () => { /* offline — procedural globe stands */ });
+  }
+
+  /** real cities: 1,200 warm dots riding the surface + population-ranked labels
+   *  (the label slider becomes a DETAIL dial: more labels = deeper into the ranking) */
+  private buildCityLayer(): void {
+    const n = CITIES.length;
+    const pos = new Float32Array(n * 3);
+    const sizes = new Float32Array(n);
+    const cols = new Float32Array(n * 3);
+    const toLocal = (latDeg: number, lonDeg: number, r: number): [number, number, number] => {
+      const la = (latDeg * Math.PI) / 180;
+      const lo = (lonDeg * Math.PI) / 180;
+      return [r * Math.cos(la) * Math.cos(lo), r * Math.sin(la), r * Math.cos(la) * Math.sin(lo)]; // +z: mirrored-texture convention
+    };
+    for (let i = 0; i < n; i++) {
+      const [name, lat, lon, pop] = CITIES[i]!;
+      void name;
+      const [x, y, z] = toLocal(lat, lon, GLOBE_R * 1.003);
+      pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
+      sizes[i] = 0.5 + Math.min(1.6, Math.log10(pop / 400_000));
+      cols[i * 3] = 1; cols[i * 3 + 1] = 0.82; cols[i * 3 + 2] = 0.55;
+    }
+    const geom = new BufferGeometry();
+    geom.setAttribute('position', new BufferAttribute(pos, 3));
+    geom.setAttribute('size', new BufferAttribute(sizes, 1));
+    geom.setAttribute('acolor', new BufferAttribute(cols, 3));
+    this.cityPoints = new Points(geom, createGlowPointsMaterial(dotTexture()));
+    this.cityPoints.frustumCulled = false;
+    this.globe.add(this.cityPoints);
+    // labels for the top of the ranking (created once; the slider gates visibility)
+    for (let i = 0; i < 60; i++) {
+      const [name, lat, lon] = CITIES[i]!;
+      const label = makeLabel(name, 0xffe2b8, 0.026);
+      const [x, y, z] = toLocal(lat, lon, GLOBE_R * 1.02);
+      label.position.set(x, y, z);
+      label.visible = false;
+      this.globe.add(label);
+      this.cityLabels.push(label);
+    }
+  }
+
+  /** how many city labels to show — driven by the label-density slider */
+  setCityDetail(count: number): void {
+    this.cityDetail = Math.max(0, Math.min(this.cityLabels.length, count));
+  }
+
+  /** per-frame: show the top-N city labels, but only on the camera-facing hemisphere */
+  private updateCityLabels(camWorldDir: Vector3 | null): void {
+    if (!this.cityLabels.length) return;
+    for (let i = 0; i < this.cityLabels.length; i++) {
+      const label = this.cityLabels[i]!;
+      if (i >= this.cityDetail || !camWorldDir) { label.visible = false; continue; }
+      label.getWorldPosition(this.cityTmp).sub(this.globeCenterTmp.setFromMatrixPosition(this.globe.matrixWorld)).normalize();
+      label.visible = this.cityTmp.dot(camWorldDir) < -0.15; // facing the camera
+    }
   }
 
   private animateShocks(realDt: number): void {
